@@ -4,9 +4,9 @@ plugins {
     id 'org.jreleaser' version '1.26.0'
 }
 
-group = 'io.github.jaffe2718'
+group = 'jp.clip'
 version = project.version
-description = 'Java port of whisper.cpp, forked from whisper-jni by GiviMAD'
+description = 'JNI bindings for whisper.cpp (v1.9.3). Derived from whisper-jni by GiviMAD via Jaffe2718.'
 
 repositories {
     mavenLocal()
@@ -49,6 +49,14 @@ tasks.withType(Javadoc).configureEach {
     options.source = '17'
 }
 
+// Apache-2.0 では、配布物に LICENSE と NOTICE を含める必要がある。
+tasks.named('jar', Jar) {
+    metaInf {
+        from(rootProject.file('LICENSE'))
+        from(rootProject.file('NOTICE'))
+    }
+}
+
 tasks.named('test') {
     useJUnitPlatform()
     testLogging.showStandardStreams = true
@@ -71,26 +79,29 @@ publishing {
                 // Apparently you need to do this because it doesn't get autofilled (at least for description)
                 name = project.name
                 description = project.description
-                url = 'https://github.com/jaffe2718/whisper-jni'
+                url = 'https://github.com/juju351nicu/whisper-jni-custom'
 
                 licenses {
                     license {
-                        name = 'MIT License'
-                        url = 'https://opensource.org/license/mit'
+                        // 由来 (GiviMAD/whisper-jni, Jaffe2718/whisper-jni) が Apache-2.0 のため、
+                        // 本プロジェクトも Apache-2.0 を維持する。LICENSE ファイルと一致させること。
+                        name = 'Apache License, Version 2.0'
+                        url = 'https://www.apache.org/licenses/LICENSE-2.0'
                     }
                 }
 
                 developers {
                     developer {
-                        name = 'LI CHANGZHE'
-                        email = 'qqyttwqeei@163.com'
+                        id = 'juju351nicu'
+                        name = 'juju351nicu'
+                        url = 'https://github.com/juju351nicu'
                     }
                 }
 
                 scm {
-                    connection = 'scm:git:https://github.com/jaffe2718/whisper-jni.git'
-                    developerConnection = 'scm:git:ssh://github.com/jaffe2718/whisper-jni.git'
-                    url = 'https://github.com/jaffe2718/whisper-jni'
+                    connection = 'scm:git:https://github.com/juju351nicu/whisper-jni-custom.git'
+                    developerConnection = 'scm:git:ssh://github.com/juju351nicu/whisper-jni-custom.git'
+                    url = 'https://github.com/juju351nicu/whisper-jni-custom'
                 }
             }
         }

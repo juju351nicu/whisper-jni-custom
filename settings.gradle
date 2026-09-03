@@ -2,5 +2,5 @@
 // artifactId) from the checkout directory name, which makes the Maven coordinate depend
 // on where the repository happens to be cloned. Pin it explicitly.
 //
-// Published coordinate:  io.github.jaffe2718:whisper-jni-custom:<version from gradle.properties>
+// Published coordinate:  jp.clip:whisper-jni-custom:<version from gradle.properties>
 rootProject.name = 'whisper-jni-custom'

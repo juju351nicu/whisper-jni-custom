@@ -10,7 +10,8 @@ A JNI wrapper for [whisper.cpp](https://github.com/ggerganov/whisper.cpp), allow
 > |---|---|
 > | whisper.cpp | **v1.9.3** (`src/main/native/whisper` submodule) |
 > | ggml | 0.20.2 |
-> | Library version | `1.9.3-1` (`<whisper.cpp version>-<build number>`) |
+> | Maven coordinate | `jp.clip:whisper-jni-custom` |
+> | Version | `1.9.3-1` (`<whisper.cpp version>-<build number of this wrapper>`) |
 > | Build JDK | Java 25 |
 > | Gradle | 9.7.1 (wrapper) |
 > | Produced bytecode | Java 17 - consumers still only need Java 17+ |
@@ -30,29 +31,54 @@ Default CPU binaries for those platforms are included in the distributed jar. Yo
 
 ## Installation
 
-The package is distributed through [Maven Central](https://central.sonatype.com/artifact/io.github.jaffe2718/whisper-jni):
+This fork is **not published to Maven Central**. Build it locally and install it into
+your local Maven repository:
 
-### Gradle
-
-```gradle
-repositories {
-    mavenCentral()
-}
-
-dependencies {
-    implementation 'io.github.jaffe2718:whisper-jni:+' // gets the latest version
-}
+```powershell
+# Windows
+.\build_windows.ps1
+New-Item -ItemType Directory -Force .\src\main\resources\windows-x64 | Out-Null
+Copy-Item .\whisperjni-build\*.dll .\src\main\resources\windows-x64\ -Force
+.\gradlew.bat publishToMavenLocal
 ```
+
+Then depend on it:
 
 ### Maven
 
 ```xml
 <dependency>
-    <groupId>io.github.jaffe2718</groupId>
-    <artifactId>whisper-jni</artifactId>
-    <version>$version</version> <!-- replace with a specific version -->
+    <groupId>jp.clip</groupId>
+    <artifactId>whisper-jni-custom</artifactId>
+    <version>1.9.3-1</version>
 </dependency>
 ```
+
+### Gradle
+
+```gradle
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'jp.clip:whisper-jni-custom:1.9.3-1'
+}
+```
+
+The jar bundles the native libraries for the platforms whose
+`src/main/resources/<os>-<arch>/` folders were populated at build time.
+
+## License
+
+Apache License, Version 2.0 - see [LICENSE](LICENSE).
+
+This project is a derivative work of [GiviMAD/whisper-jni](https://github.com/GiviMAD/whisper-jni)
+and [Jaffe2718/whisper-jni](https://github.com/Jaffe2718/whisper-jni), both Apache-2.0.
+The bundled native libraries are built from [whisper.cpp](https://github.com/ggml-org/whisper.cpp),
+which is MIT licensed. See [NOTICE](NOTICE) for the full attribution and the list of
+modifications.
 
 ## Examples
 

@@ -63,7 +63,7 @@
 - **Gradle 9.7.1 + JDK 25.0.4.1 で `tasks` / `jar` / `sourcesJar` / `javadocJar` / `generatePomFileForMavenPublication` が BUILD SUCCESSFUL**
   - `--warning-mode all` で **deprecation 警告 0 件**
   - 生成クラスファイルの major version = **61（Java 17）**
-  - 生成 POM = `io.github.jaffe2718:whisper-jni-custom:1.9.3-1`
+  - 生成 POM = `jp.clip:whisper-jni-custom:1.9.3-1`（Step 1 で groupId 変更後）
 
 ### 検証済み（Windows 11 / MSVC）  2026-09-03 完了
 
@@ -167,7 +167,7 @@ Copy-Item .\whisperjni-build\*.dll .\src\main\resources\windows-x64\ -Force
 
 ```xml
 <dependency>
-    <groupId>io.github.jaffe2718</groupId>
+    <groupId>jp.clip</groupId>
     <artifactId>whisper-jni-custom</artifactId>
     <version>1.9.3-1</version>
 </dependency>
@@ -270,7 +270,7 @@ git push
 
 ---
 
-## Step 1 — ① Java 25 対応の確定（小さい仕上げ作業）
+## Step 1 — ① Java 25 対応の確定  ✅ 2026-09-03 完了
 
 コード変更はほぼ不要です。決めごとと、ついで作業をまとめて片付けます。
 
@@ -318,7 +318,29 @@ POM の `developers` / `scm` / `url` も自分のものに直しておきます�
 *.cmd  text eol=crlf
 ```
 
-**完了条件**: `gradlew test` が緑のまま、`gradlew build` の警告が増えていない。
+**実施結果（2026-09-03）**
+
+| 項目 | 内容 |
+|---|---|
+| バイトコード | Java 17 のまま維持（`options.release = 17`）。変更なし |
+| ライセンス表記 | POM を MIT → **Apache License, Version 2.0** に修正。上流2つ（GiviMAD / Jaffe2718）とも Apache-2.0 であることを確認済み |
+| `NOTICE`（新規） | 由来・変更点・同梱ネイティブ（whisper.cpp は **MIT**）・同梱 VAD モデルの出所を明記。Apache-2.0 §4(b)(d) 対応 |
+| jar 同梱 | `META-INF/LICENSE` と `META-INF/NOTICE` を jar に含めるようにした（実際に含まれることを確認済み） |
+| POM メタデータ | `url` / `developers` / `scm` を自分のリポジトリへ。開発者はメールアドレスなしで GitHub ハンドルのみ |
+| **groupId** | `io.github.jaffe2718` → **`jp.clip`**（Step 2 から前倒し。理由は下記） |
+| Gradle wrapper | `gradlew` / `gradlew.bat` / `gradle-wrapper.jar` を 9.7.1 付属のものに再生成 |
+| wrapper 検証 | `distributionSha256Sum` を追加。zip が壊れていたら検証エラーで落ちる（今回ハマった `Could not initialize native services` の予防）|
+| wrapper リトライ | `retries=3` に設定（既定は 0） |
+| `.gitattributes` | 改行ルールは Step 0 で実施済み |
+
+**groupId を前倒しした理由**: `io.github.jaffe2718` は所有していない GitHub アカウントの
+名前空間です。ライセンスと `scm` を自分のものに直すのに groupId だけ他人のままでは矛盾し、
+Maven Central 公開時にも名前空間の所有証明ができません。また今のうちに変えておけば、
+transcribe-shell の `pom.xml` 書き換えが 1 回で済みます（Step 2 の package リネームでは
+座標は変わりません）。
+
+検証: Gradle 9.7.1 + JDK 25 で `jar` / `generatePomFileForMavenPublication` が BUILD SUCCESSFUL、
+deprecation 警告 0 件、生成 POM とjar 内 `META-INF` の内容を確認済み。
 
 ---
 
@@ -361,7 +383,7 @@ POM の `developers` / `scm` / `url` も自分のものに直しておきます�
 
 4. **ビルド設定を追随**
    - `CMakeLists.txt` の `add_library(whisper-jni SHARED src/main/native/io_github_...cpp)` を新ファイル名へ
-   - `build.gradle` の `group = 'io.github.jaffe2718'` → `'jp.clip'`
+   - ~~`build.gradle` の `group = 'io.github.jaffe2718'` → `'jp.clip'`~~ → **Step 1 で実施済み**
    - `README.md` の座標記述
 
 5. **検証**

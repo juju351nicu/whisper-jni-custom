@@ -1,0 +1,68 @@
+whisper-jni-custom
+Copyright 2026 juju351nicu
+
+This product includes software developed as part of the projects listed below.
+A copy of the Apache License, Version 2.0 is provided in the LICENSE file.
+
+================================================================================
+1. Java / JNI layer  (Apache License, Version 2.0)
+================================================================================
+
+This project is a derivative work of:
+
+  whisper-jni
+    https://github.com/GiviMAD/whisper-jni
+    Copyright (c) Miguel Alvarez Diez
+    Licensed under the Apache License, Version 2.0
+
+  whisper-jni (fork)
+    https://github.com/Jaffe2718/whisper-jni
+    Copyright (c) LI CHANGZHE
+    Licensed under the Apache License, Version 2.0
+
+The Java and JNI sources in this repository have been modified from the
+originals. Notable modifications, as required by section 4(b) of the License:
+
+  - Updated the bundled whisper.cpp from v1.8.3 to v1.9.3 (ggml 0.9.5 -> 0.20.2)
+  - Added "parakeet" to the native library load order (new in whisper.cpp 1.9.3)
+  - Updated the build toolchain to Java 25 / Gradle 9.7.1; the published
+    bytecode target remains Java 17
+  - Corrected the license declaration in the published POM, which previously
+    stated the MIT License while the LICENSE file was Apache-2.0
+  - Changed the Maven coordinate to jp.clip:whisper-jni-custom
+  - Reworked the Windows build and model download scripts
+
+See the git history of https://github.com/juju351nicu/whisper-jni-custom for the
+complete list of changes.
+
+================================================================================
+2. Bundled native libraries  (MIT License)
+================================================================================
+
+The native libraries distributed inside this project's jar - whisper, ggml,
+ggml-base, ggml-cpu, parakeet and their per-platform equivalents (.dll / .so /
+.dylib) - are compiled from:
+
+  whisper.cpp
+    https://github.com/ggml-org/whisper.cpp
+    Copyright (c) 2023-2026 The ggml authors
+    Licensed under the MIT License
+
+The full MIT License text ships with the submodule at
+src/main/native/whisper/LICENSE.
+
+This project also compiles src/main/native/whisper/examples/grammar-parser.cpp
+from the same whisper.cpp source tree into the whisper-jni native library.
+
+================================================================================
+3. Bundled VAD model
+================================================================================
+
+The published jar includes a Voice Activity Detection model,
+ggml-silero-v6.2.0.bin, obtained from:
+
+  https://huggingface.co/ggml-org/whisper-vad
+
+It is a ggml conversion of the Silero VAD model
+(https://github.com/snakers4/silero-vad). Verify its license terms before
+redistributing this jar outside your own organisation.
