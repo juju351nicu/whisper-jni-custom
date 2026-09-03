@@ -15,3 +15,10 @@
 # are changed when only line endings change.
 src/generated/**/.cache/cache text eol=lf
 src/generated/**/*.json text eol=lf
+
+# Shell scripts must stay LF (they run on Linux / macOS / CI).
+# Windows scripts must stay CRLF.
+*.sh   text eol=lf
+*.ps1  text eol=crlf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
