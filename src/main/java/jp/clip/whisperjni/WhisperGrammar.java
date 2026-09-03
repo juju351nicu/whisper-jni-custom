@@ -74,7 +74,7 @@ public class WhisperGrammar extends WhisperJNI.WhisperJNIPointer {
 		}
 		
 		Map<String, String> expressions = parseExpressionsText(grammarText);
-		var rootExpression = expressions.get("root");
+		String rootExpression = expressions.get("root");
 		
 		if(rootExpression == null)
 		{
@@ -190,8 +190,8 @@ public class WhisperGrammar extends WhisperJNI.WhisperJNIPointer {
 		}
 		for(int i = 0; i < tokens.length; i++)
 		{
-			var token = tokens[i];
-			var isLast = i == tokens.length - 1;
+			String token = tokens[i];
+			boolean isLast = i == tokens.length - 1;
 			if(token.isBlank())
 			{
 				continue;
@@ -322,7 +322,7 @@ public class WhisperGrammar extends WhisperJNI.WhisperJNIPointer {
 			{
 				subExpression = subExpression.substring(0, subExpression.length() - 1);
 			}
-			var subExpressionValue = expressions.get(subExpression);
+			String subExpressionValue = expressions.get(subExpression);
 			if(subExpressionValue == null)
 			{
 				throw new ParseException("Unable to resolve expression: " + subExpression, 0);

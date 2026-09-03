@@ -344,7 +344,7 @@ deprecation 警告 0 件、生成 POM とjar 内 `META-INF` の内容を確認�
 
 ---
 
-## Step 2 — ⑤ 完全リネーム + 2層化  （2-1 ✅ 2026-09-03 完了 / 2-2 は Step 3 の後）
+## Step 2 — ⑤ 完全リネーム + 2層化  ✅ 2026-09-03 完了
 
 ### 2-1. JNI bridge 層のリネーム `io.github.jaffe2718.whisperjni` → `jp.clip.whisperjni`
 
@@ -464,6 +464,56 @@ try (var engine = WhisperEngine.open(config)) {
 
 ---
 
+### 2-1 / 2-2 実施結果（2026-09-03）
+
+**2-1 完全リネーム** `io.github.jaffe2718.whisperjni` → `jp.clip.whisperjni`（115箇所）
+
+- `git mv` を使用したため履歴は `git log --follow` で追える
+- JNI ヘッダを `javac -h` で正規再生成して比較 → シンボル 65 個・include guard 完全一致
+- Java の native 宣言 vs 共有ライブラリのエクスポートシンボル → **27 / 27 完全一致**
+- 旧シンボル `Java_io_github_jaffe2718_*` の残存 **0 件**
+- `.cpp` 内の FindClass / GetMethodID 文字列リテラルを全件監査。プロジェクトのパッケージを
+  参照する文字列は `"jp/clip/whisperjni/TokenData"` の 1 箇所のみで、正しく置換済み
+- Windows で `gradlew test` 全件パス。`testTokens` の TOKEN 出力により、静的検証できない
+  `FindClass` の経路も実行時に確認
+
+**2-2 高水準 API 層** `jp.clip.whisper` を新規追加（純粋な追加。既存 API は無変更）
+
+| クラス | 役割 |
+|---|---|
+| `WhisperEngine` | 入口。`AutoCloseable`。ネイティブのロード・コンテキスト管理・パラメータ組み立てを隠蔽 |
+| `WhisperConfig` | 設定 + Builder。モデル / 言語 / スレッド数 / VAD / 文法 / ネイティブ配置先 |
+| `TranscriptionResult` | `text()` `segments()` `elapsedMs()` `realTimeFactor()` |
+| `Segment` | `startMs()` `endMs()` `text()` `durationMs()`（**ミリ秒**に変換済み） |
+| `SamplingStrategy` | `GREEDY` / `BEAM_SEARCH`（int 定数を型安全に包む） |
+| `WhisperException` | 非チェック例外 |
+
+設計上の判断:
+
+- **低レイヤの型を公開 API に露出させない。** `WhisperContext` / `WhisperState` /
+  `WhisperFullParams` / `WhisperGrammar` はすべて `WhisperEngine` の内部に隠している。
+  transcribe-shell 側の import は `jp.clip.whisper.*` だけで済む
+- VAD モデルは jar 同梱のものを一時ファイルへ自動展開（プロセス内で 1 回だけ）
+- ネイティブのロードは JVM 内で 1 回だけ（static ガード）
+- 進捗ログは既定で無効（`printNativeProgress(true)` で有効化）
+- `WhisperEngine` はスレッド安全ではない（Javadoc に明記）
+
+テスト: `src/test/java/jp/clip/whisper/WhisperEngineTest.java`（15 テスト）。
+低レイヤの `WhisperJNITest` が whisper.cpp の出力を完全一致で検証するのに対し、
+こちらは **API 層の振る舞い**（構造・時刻の単位・例外・後始末）を検証し、文字列は部分一致で
+確認する。これにより whisper.cpp 更新時に句読点の揺れで落ちない。
+
+検証（クラウド Linux、実機ネイティブ）: API 層スモークテスト **14 / 14 PASS**。
+`readAudioSamples` が jfk.wav を 176,000 サンプル = 11.0 秒 @16kHz で読めること、
+VAD モデルの自動展開が動作することを確認。
+
+**コーディングルールを追加**
+
+`var`（型推論）を使わない方針に決定。既存コード 44 箇所（`WhisperGrammar` 4 / 
+`WhisperJNITest` 40）を明示型に置換し、`CLAUDE.md` にルールとして記載した。
+`CLAUDE.md` には他に JNI リネーム時の手順、スクリプトの規約、作業の進め方もまとめてある。
+
+---
 ## Step 3 — ②/⑥ リファクタリング  ✅ 2026-09-03 完了
 
 Step 2 が緑になってから着手します。**1項目ずつコミット**してください。

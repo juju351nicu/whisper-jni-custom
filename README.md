@@ -80,7 +80,70 @@ The bundled native libraries are built from [whisper.cpp](https://github.com/ggm
 which is MIT licensed. See [NOTICE](NOTICE) for the full attribution and the list of
 modifications.
 
-## Examples
+## Usage — `jp.clip.whisper` (recommended)
+
+高水準 API 層です。ネイティブのロード、コンテキストの生存管理、パラメータの組み立てを
+すべて隠蔽しているので、利用側はこのパッケージだけを見れば済みます。
+
+```java
+import java.nio.file.Path;
+import jp.clip.whisper.SamplingStrategy;
+import jp.clip.whisper.Segment;
+import jp.clip.whisper.TranscriptionResult;
+import jp.clip.whisper.WhisperConfig;
+import jp.clip.whisper.WhisperEngine;
+
+WhisperConfig config = WhisperConfig.builder()
+        .model(Path.of("ggml-large-v3-turbo-q5_0.bin"))
+        .language("ja")                                    // 既定は "en"
+        .threads(Runtime.getRuntime().availableProcessors())
+        .vad(true)                                         // 無音区間を除去して高速化
+        .build();
+
+try (WhisperEngine engine = WhisperEngine.open(config))
+{
+    TranscriptionResult result = engine.transcribe(Path.of("input.wav"));
+
+    System.out.println(result.text());
+    System.out.printf("%d ms / RTF %.2f%n", result.elapsedMs(), result.realTimeFactor());
+
+    for (Segment segment : result.segments())
+    {
+        System.out.printf("[%d-%d] %s%n", segment.startMs(), segment.endMs(), segment.text());
+    }
+}
+```
+
+### クラス構成
+
+| クラス | 役割 |
+|---|---|
+| `WhisperEngine` | 入口。`AutoCloseable`。`open` / `transcribe` / `close` |
+| `WhisperConfig` | 設定。`WhisperConfig.builder()` から組み立てる |
+| `TranscriptionResult` | 結果全体。`text()` `segments()` `elapsedMs()` `realTimeFactor()` |
+| `Segment` | 1 区間。`startMs()` `endMs()` `text()` `durationMs()` |
+| `SamplingStrategy` | `GREEDY` / `BEAM_SEARCH` |
+| `WhisperException` | 失敗時の非チェック例外 |
+
+### 補足
+
+- 時刻は**ミリ秒**です（whisper.cpp のセンチ秒からこの層で変換しています）。
+- `transcribe(Path)` は 16kHz モノラル 16bit PCM 以外も、Java の標準変換で対応できる
+  範囲であれば自動変換します。自前でデコードしている場合は `transcribe(float[])` を
+  使ってください（16kHz モノラル、-1.0f〜1.0f 正規化）。
+- `vad(true)` を指定すると、VAD モデルは jar 同梱のものが一時ファイルへ自動展開されます。
+  自分で用意したモデルを使う場合は `vadModel(path)` を指定してください。
+- GPU 版（Vulkan / CUDA）のネイティブを使う場合は `nativeLibraryDirectory(path)` を指定します。
+- **`WhisperEngine` はスレッド安全ではありません。** 並列処理したい場合はスレッドごとに
+  インスタンスを生成してください。
+
+---
+
+## Low-level API — `jp.clip.whisperjni`
+
+whisper.cpp の関数に 1 対 1 で対応する薄い層です。上の高水準 API で足りない機能
+（state を分離した実行、トークン単位の情報など）が必要な場合に使います。
+### Examples
 
 ```java
 var whisper = new WhisperJNI();
