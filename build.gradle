@@ -82,6 +82,30 @@ tasks.named('test') {
     }
 }
 
+// 高速化の計測（Step 5）。使い方は src/test/java/jp/clip/whisper/Benchmark.java の Javadoc を参照。
+//   .\gradlew.bat benchmark "-Pbench.audio=C:\audio\meeting.wav" "-Pbench.models=models\ggml-small.bin;models\ggml-large-v3-turbo-q5_0.bin" "-Pbench.threads=4,8,12" "-Pbench.vad=both"
+tasks.register('benchmark', JavaExec) {
+    group = 'whisper-jni'
+    description = 'Measures transcription speed (RTF) for model x threads x VAD combinations'
+
+    dependsOn 'testClasses'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'jp.clip.whisper.Benchmark'
+
+    // -Pbench.<key>=<value> をそのまま key=value 引数として渡す
+    args = project.properties.findAll { it.key.startsWith('bench.') }.collect { "${it.key.substring(6)}=${it.value}" }
+
+    // 計測中は whisper.cpp のログ（モデル読み込みの INFO など）を黙らせる
+    systemProperty 'org.slf4j.simpleLogger.defaultLogLevel', 'warn'
+    systemProperty 'file.encoding', 'UTF-8'
+    systemProperty 'stdout.encoding', 'UTF-8'
+
+    def benchJavaMajor = Integer.parseInt(JavaVersion.current().majorVersion)
+    if (benchJavaMajor >= 22) {
+        jvmArgs '--enable-native-access=ALL-UNNAMED'
+    }
+}
+
 publishing {
     publications {
         maven(MavenPublication) {

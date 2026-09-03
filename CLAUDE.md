@@ -181,6 +181,8 @@ Move-Item .\ggml-silero-v6.2.0.bin .\src\main\resources\ -Force
 
 - ネイティブを作り直したら `build\` を消してから `scripts\build-windows.ps1`
   （`--fresh` を付けてあるが、念のため）
+- 高速化の計測は `gradlew benchmark "-Pbench.audio=..." "-Pbench.models=..."`（`Benchmark.java` の Javadoc 参照）。
+  モデルの取得は `scripts\download-model.ps1 <モデル名>` → `models\` に置かれる
 - Gradle が `Could not initialize native services` で落ちる場合は
   `GRADLE_USER_HOME` を `C:\pr-work\.gradle-home` に向ける（詳細は `WINDOWS-BUILD-1.9.3.md`）
 

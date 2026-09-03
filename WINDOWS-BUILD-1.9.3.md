@@ -755,29 +755,62 @@ git push
 
 ---
 
-## Step 5 — ③/⑦ 高速化（方針 (c)：whisper.cpp 側で詰める）
+## Step 5 — ③/⑦ 高速化（方針 (c)：whisper.cpp 側で詰める）  ▶ 5-1 計測ツール準備済み（2026-09-03）
 
 **測定 → 1つずつ変更 → 再測定** を守ってください。まとめて変えると何が効いたか分かりません。
 
-### 5-1. まずベースラインを記録する
+### 対象マシン（2026-09-03 確認）
 
-Step 2 で作った `WhisperEngine` に簡易ベンチ（音声長 / 処理時間 / RTF = 処理時間÷音声長）を入れて、
-現在の transcribe-shell と同条件で測ります。記録項目：
+| 項目 | 値 | 高速化への意味 |
+|---|---|---|
+| CPU | Core i5-1335U（P コア 2 + E コア 8、12 スレッド） | whisper.cpp の既定は 4 スレッド。**P コアが 2 つしかない**ので、スレッドを増やしても伸びは限定的。4 / 6 / 8 / 12 を実測して決める |
+| GPU | Intel Iris Xe（内蔵、共有メモリ 2 GB） | **CUDA は不可**（NVIDIA 専用）。Vulkan は動くが、内蔵 GPU は CPU とメモリ帯域を共有するため whisper では CPU と同等〜1.5 倍程度にとどまることが多い。Intel 向けには **OpenVINO（エンコーダのみ）**という選択肢もある |
+| メモリ | 未確認 | large-v3-turbo-q5_0 は読み込みに約 1 GB、small は約 0.5 GB |
+| 電源 | ノート PC | U シリーズは熱で落ちるので、**計測は AC 電源で・同じ条件を 2 回以上** |
+| 手元のモデル | `ggml-tiny.bin`（74 MB）、`ggml-small.bin`（465 MB） | 量子化版と large-v3-turbo は未取得 |
 
-- モデル（サイズ・量子化）/ 音声の長さ / スレッド数 / バックエンド（CPU or GPU）
-- 処理時間、RTF、体感の精度
+### 5-1. ベースライン計測  ✅ ツール準備済み
 
-### 5-2. 効果が大きい順に試す
+`src/test/java/jp/clip/whisper/Benchmark.java` と Gradle の `benchmark` タスクを追加しました。
+モデル × スレッド数 × VAD × 戦略の組み合わせを回し、RTF（処理時間 ÷ 音声長）を表と CSV
+（`build/benchmark/benchmark-<日時>.csv`）に出します。
 
-| # | 手段 | 期待できる効果 | 備考 |
-|---|---|---|---|
-| 1 | **GPU バックエンド（Vulkan / CUDA）** | 最大。数倍〜十数倍 | CI で既に Vulkan natives をビルド済み。Windows に GPU があれば最優先 |
-| 2 | **モデルを `large-v3-turbo` 系の量子化版へ** | 大。速度/精度比が非常に良い | `ggml-large-v3-turbo-q5_0.bin` など。`q8_0` は精度寄り、`q5_0` は速度寄り |
-| 3 | **VAD で無音を落とす** | 長い録音ほど大。無音が半分なら処理も半分 | `params.vad = true` + silero v6.2.0。今回 jfk.wav で 3 区間検出を実測済み |
-| 4 | **スレッド数を物理コア数に合わせる** | 中。デフォルトは 4 なので余裕があることが多い | `WhisperConfig.threads` |
-| 5 | **BEAM_SEARCH → GREEDY** | 中。精度とのトレードオフ | 日本語の精度低下が許容できるか要判断 |
-| 6 | **`audio_ctx` の縮小** | 短い音声で中 | 30秒より短い音声なら encoder のコンテキストを削れる |
-| 7 | **flash attention** | — | **1.9.3 では既に有効**（起動ログに `flash attn = 1` が出ています）。作業不要 |
+```powershell
+# 0. 日本語の計測用音声を 1 本用意する（WAV。数分あるとよい。会議録音など）。以下 C:\audio\sample-ja.wav とする
+
+# 1. モデルを取得（models\ に置く。ggml-*.bin は .gitignore 済み）
+.\scripts\download-model.ps1 small-q5_1
+.\scripts\download-model.ps1 large-v3-turbo-q5_0
+Copy-Item "$env:USERPROFILE\whisper-models\ggml-small.bin" .\models\
+
+# 2. ベースライン（現状の条件: small、既定スレッド、VAD なし、GREEDY）
+.\gradlew.bat benchmark "-Pbench.audio=C:\audio\sample-ja.wav" "-Pbench.models=models\ggml-small.bin" "-Pbench.repeat=3"
+
+# 3. 効果測定を 1 コマンドで（モデル 3 種 × スレッド 4 種 × VAD あり/なし = 24 条件。数十分かかる）
+.\gradlew.bat benchmark "-Pbench.audio=C:\audio\sample-ja.wav" `
+  "-Pbench.models=models\ggml-small.bin;models\ggml-small-q5_1.bin;models\ggml-large-v3-turbo-q5_0.bin" `
+  "-Pbench.threads=4,6,8,12" "-Pbench.vad=both" "-Pbench.repeat=2"
+```
+
+出力の見方: `minRTF` がその条件の実力値、`medRTF` が実運用の目安。`text` 列で日本語の精度が
+崩れていないかも一緒に見てください（速くても文字化けや脱落があれば不採用）。CSV をこのファイルの
+「5-4 計測結果」に貼っていきます。
+
+### 5-2. 効果が大きい順に試す（この PC 向けに並べ直し）
+
+| # | 手段 | 期待できる効果 | 工数 | 備考 |
+|---|---|---|---|---|
+| 1 | **モデルを `large-v3-turbo-q5_0` へ** | 大。small より精度が良く、速度は同等〜やや遅い程度 | 計測のみ | CPU のみの環境では本命 |
+| 2 | **VAD で無音を落とす** | 長い録音ほど大。無音が半分なら処理も半分 | 計測のみ | `vadEnabled(true)`。実装済み |
+| 3 | **スレッド数** | 中。P コア 2 なので過度な期待はしない | 計測のみ | 4 / 6 / 8 / 12 を比較 |
+| 4 | **GREEDY 固定** | 中 | 計測のみ | 既定が GREEDY。BEAM_SEARCH との精度差を `text` 列で確認 |
+| 5 | **Vulkan（Iris Xe）** | 不明。CPU と同等〜1.5 倍の見込み | 2〜4 セッション、ディスク +1〜2 GB（Vulkan SDK） | 1〜4 で足りなければ試す。`CMakeLists.txt` は `-DGGML_VULKAN=ON` に対応済み、`NativeLibraryLoader` はランタイム検出済み |
+| 6 | **OpenVINO エンコーダ** | 中〜大（Intel 向けに最適化。エンコーダのみ） | 3〜5 セッション。OpenVINO ランタイム + モデル変換（Python 環境が必要） | `WhisperJNI#initOpenVinoEncoder` は実装済みだがビルドが `WHISPER_OPENVINO=OFF` |
+| 7 | `audio_ctx` の縮小 | 短い音声で中 | 小 | 30 秒より短い入力向け |
+| — | flash attention | — | 不要 | **1.9.3 で既定有効**（起動ログ `flash attn = 1`） |
+
+工数の目安: 1〜4 は合わせて **2〜3 セッション**（ほぼ計測時間）。5 まで含めると **5〜7 セッション**。
+CPU のみで目標に届くなら 5 以降はやらない。
 
 ### 5-3. それでも足りなければ
 
@@ -787,6 +820,10 @@ Step 2 で作った `WhisperEngine` に簡易ベンチ（音声長 / 処理時�
 - **Python の faster-whisper をプロセス起動**: 実装は軽いが、Python 環境の配布が課題
 
 Step 2 の API 層があるので、どの手段を選んでも **transcribe-shell 側の import は変わりません**。
+
+### 5-4. 計測結果
+
+（`gradlew benchmark` の CSV をここに貼る）
 
 ---
 
