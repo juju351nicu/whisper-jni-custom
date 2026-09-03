@@ -1,4 +1,4 @@
-package io.github.jaffe2718.whisperjni;
+package jp.clip.whisperjni;
 
 /**
  * The {@link WhisperContext} class represents a native whisper.cpp context.

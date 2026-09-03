@@ -1,6 +1,6 @@
-package io.github.jaffe2718.whisperjni;
+package jp.clip.whisperjni;
 
-import static io.github.jaffe2718.whisperjni.WhisperGrammar.assertValidGrammar;
+import static jp.clip.whisperjni.WhisperGrammar.assertValidGrammar;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;

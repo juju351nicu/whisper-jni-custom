@@ -1,4 +1,4 @@
-package io.github.jaffe2718.whisperjni;
+package jp.clip.whisperjni;
 
 import java.io.IOException;
 import java.nio.file.Files;

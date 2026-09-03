@@ -1,4 +1,4 @@
-package io.github.jaffe2718.whisperjni;
+package jp.clip.whisperjni;
 
 public class WhisperVADSegment {
 	

@@ -149,6 +149,6 @@ Prerequisites: **JDK 25** (`JAVA_HOME` must point at it), CMake 3.21+, and a C/C
 If you want to add any missing whisper.cpp functionality, you need to:
 
 - Add the native method description in `WhisperJNI.java`.
-- Run the `generateHeaders` gradle task to regenerate the `src/main/native/io_github_jaffe2718_whisperjni_WhisperJNI.h` header file.
-- Add the native method implementation in `src/main/native/io_github_jaffe2718_whisperjni_WhisperJNI.cpp`.
+- Run the `generateHeaders` gradle task to regenerate the `src/main/native/jp_clip_whisperjni_WhisperJNI.h` header file.
+- Add the native method implementation in `src/main/native/jp_clip_whisperjni_WhisperJNI.cpp`.
 - Add a new test for it in `WhisperJNITest.java`.

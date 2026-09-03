@@ -63,7 +63,7 @@ endif ()
 add_subdirectory(src/main/native/whisper)
 
 add_library(whisper-jni SHARED
-        src/main/native/io_github_jaffe2718_whisperjni_WhisperJNI.cpp
+        src/main/native/jp_clip_whisperjni_WhisperJNI.cpp
         # Needed
         src/main/native/whisper/examples/grammar-parser.cpp
 )
