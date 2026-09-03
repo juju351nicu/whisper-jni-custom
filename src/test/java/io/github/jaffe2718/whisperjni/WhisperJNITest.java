@@ -24,6 +24,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 // @Disabled
+// NOTE: 文字起こし結果の期待値（文字列・タイムスタンプ）は whisper.cpp のバージョンに依存します。
+// 現在の値は whisper.cpp v1.9.3 / ggml 0.20.2 での実測値です。
+// v1.8.3 では BEAM_SEARCH の結果に "Americans" 後のカンマがありませんでした。
+// whisper.cpp を更新した際にこれらが失敗する場合は、まず期待値のズレを疑ってください。
 public class WhisperJNITest {
 	
 	private static Path testModelPath = Path.of("ggml-tiny.bin");
@@ -180,7 +184,7 @@ public class WhisperJNITest {
 			int numSegments = whisper.fullNSegments(ctx);
 			assertEquals(1, numSegments);
 			String text = whisper.fullGetSegmentText(ctx, 0);
-			assertEquals(" And so, my fellow Americans ask not what your country can do for you, ask what you can do for your country.", text);
+			assertEquals(" And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country.", text);
 			
 			// Grab tokens from each segment
 			for(int i = 0; i < numSegments; i++)
@@ -376,7 +380,7 @@ public class WhisperJNITest {
 			int numSegments = whisper.fullNSegments(ctx);
 			assertEquals(1, numSegments);
 			String text = whisper.fullGetSegmentText(ctx, 0);
-			assertEquals(" And so, my fellow Americans ask not what your country can do for you, ask what you can do for your country.", text);
+			assertEquals(" And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country.", text);
 		}
 	}
 	
@@ -428,7 +432,7 @@ public class WhisperJNITest {
 				int numSegments = whisper.fullNSegmentsFromState(state);
 				assertEquals(1, numSegments);
 				String text = whisper.fullGetSegmentTextFromState(state, 0);
-				assertEquals(" And so, my fellow Americans ask not what your country can do for you, ask what you can do for your country.", text);
+				assertEquals(" And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country.", text);
 			}
 		}
 	}

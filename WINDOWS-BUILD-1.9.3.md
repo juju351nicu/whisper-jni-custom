@@ -65,14 +65,24 @@
   - 生成クラスファイルの major version = **61（Java 17）**
   - 生成 POM = `io.github.jaffe2718:whisper-jni-custom:1.9.3-1`
 
-### 未検証（Windows 側でお願いしたいこと）
+### 検証済み（Windows 11 / MSVC）  2026-09-03 完了
 
-- MSVC での DLL ビルド（`build_windows.ps1`）
-- 実モデル `ggml-tiny.bin` を使った `./gradlew test` の全 20 テスト
-  （クラウド／デバイス双方から Hugging Face と Maven Central に到達できないため、
-  ダミーモデルでの API 疎通確認までしか実施できていません）
-- `jreleaser` 1.26.0 プラグインの実解決（plugins.gradle.org に到達できず）
+- Visual Studio 18 Community (18.4.2) + MSVC 19.50.35728.0 (v14.50) + Windows 11 SDK 10.0.26100
+- CMake 4.4.3 / generator `Visual Studio 18 2026` / JNI ヘッダは Corretto JDK 25.0.2
+- `build_windows.ps1` でネイティブビルド成功。生成 DLL 6 個:
+  `whisper-jni.dll` `whisper.dll` `ggml.dll` `ggml-base.dll` `ggml-cpu.dll` **`parakeet.dll`**
+- Windows 版は `/arch:AVX2` でビルドされます（`GGML_AVX2;GGML_FMA;GGML_F16C;GGML_BMI2`）。
+  つまり **AVX2 非対応の古い CPU では動きません**。上流からの既存挙動です。
+- `gradlew test` → **20 tests, failures=0, errors=0**（Gradle 9.7.1 + JDK 25 Corretto）
 
+BEAM_SEARCH の期待文字列だけ 1.9.3 で変わったため更新しました（`Americans` の後にカンマが入る）。
+GREEDY はタイムスタンプまで含めて 1.8.3 と完全一致です。
+
+### 未検証
+
+- `jreleaser` 1.26.0 での Maven Central 公開（`jreleaserDeploy`）
+- Vulkan / CUDA ネイティブのビルド（CI 側のみ）
+- macOS / Linux での 1.9.3 ビルド（クラウド Linux では検証済み、CI 未実行）
 ---
 
 ## 3. Windows での手順
@@ -195,6 +205,23 @@ Maven Central への公開でしか使わないプラグインです。
 `build` / `test` / `publishToMavenLocal` は問題なく動きます。
 （実際にこの構成でオフライン検証を通してあります）
 
+### `Could not initialize native services` / `Could not extract native JNI library`
+
+Gradle 自身のキャッシュ破損です。プロジェクトのコードとは無関係です。
+`%USERPROFILE%\.gradle` が壊れると発生し、`.gradle\native` や `.gradle\wrapper\dists` を
+消すだけでは直らないことがあります。確実な回避策は **Gradle ホームを別の場所にする**ことです。
+
+```powershell
+# このウィンドウだけで試す
+$env:GRADLE_USER_HOME = "C:\pr-work\.gradle-home"
+
+# 恒久化する（新しいウィンドウでも有効になる）
+[Environment]::SetEnvironmentVariable("GRADLE_USER_HOME", "C:\pr-work\.gradle-home", "User")
+```
+
+2026-09-03 に実際にこれで復旧しました。**この環境変数を設定していない新しい PowerShell では
+再発します。**別マシンへ移る際も、Gradle ホームは `C:\pr-work\.gradle-home` のように
+プロジェクト近くに置いておくと、片付けも楽で事故も減ります。
 ### `UnsatisfiedLinkError`
 
 `whisperjni-build`（または `src/main/resources/windows-x64`）に

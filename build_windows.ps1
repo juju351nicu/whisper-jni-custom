@@ -37,6 +37,26 @@ if (-not $cmake) {
     exit 1
 }
 
+function Test-MsvcInstalled {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (-not (Test-Path $vswhere)) { return $true }   # 判定できないので CMake に委ねる
+    $found = & $vswhere -latest -prerelease -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    return [bool]$found
+}
+
+if (-not (Test-MsvcInstalled)) {
+    Write-Host ""
+    Write-Host "[ERROR] Visual Studio の C++ ツールセット (MSVC) が見つかりません。" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  スタートメニューから「Visual Studio Installer」を起動し、" -ForegroundColor Yellow
+    Write-Host "  「変更」→「C++ によるデスクトップ開発」を追加してください。"
+    Write-Host "  必要な個別コンポーネントは次の 2 つだけです:"
+    Write-Host "    - x64/x86 用 MSVC ビルド ツール (最新)"
+    Write-Host "    - Windows 11 SDK"
+    Write-Host ""
+    exit 1
+}
+
 Write-Host "[INFO] cmake: $cmake" -ForegroundColor Cyan
 & $cmake --version | Select-Object -First 1
 
@@ -46,7 +66,8 @@ if ($vulkanEnabled -eq "ON") {
 
 New-Item -Path $TARGET_DIR -ItemType Directory -Force | Out-Null
 
-& $cmake -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_INSTALL_PREFIX=$TMP_DIR" -DGGML_STATIC=1 -DWHISPER_BUILD_IS_DEV=OFF "-DGGML_VULKAN=$vulkanEnabled"
+# --fresh: 前回失敗時に残った CMakeCache.txt のジェネレーター設定を引き継がない
+& $cmake --fresh -B build -S . -DCMAKE_BUILD_TYPE=Release "-DCMAKE_INSTALL_PREFIX=$TMP_DIR" -DGGML_STATIC=1 -DWHISPER_BUILD_IS_DEV=OFF "-DGGML_VULKAN=$vulkanEnabled"
 if ($LASTEXITCODE -ne 0) { Write-Host "[ERROR] cmake configure が失敗しました" -ForegroundColor Red; exit $LASTEXITCODE }
 
 & $cmake --build build --config Release
