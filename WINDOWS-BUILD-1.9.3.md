@@ -514,7 +514,7 @@ VAD モデルの自動展開が動作することを確認。
 `CLAUDE.md` には他に JNI リネーム時の手順、スクリプトの規約、作業の進め方もまとめてある。
 
 ---
-## Step 3 — ②/⑥ リファクタリング  ✅ 2026-09-03 完了
+## Step 3 — ②/⑥ リファクタリング  ✅ 3-1〜3-3 完了 / 3-4 Windows 検証待ち
 
 Step 2 が緑になってから着手します。**1項目ずつコミット**してください。
 まとめてやると、壊れたときに原因が分からなくなります。
@@ -593,6 +593,135 @@ src/main/native/
 検証: `scripts/build-linux.sh` を **/tmp から実行**して通しでビルド成功（cd 処理の確認）。
 生成ライブラリ 6 個、JNI シンボル **27/27 完全一致**を維持。
 
+### 3-4. クラス構成の全面見直し（徹底リファクタリング）  ✅ 2026-09-03 クラウド検証完了・Windows 検証待ち
+
+「高速化は後回しでよいのでリファクタリングを徹底的に。クラス構成を細かく見直す。
+lombok 等を入れてもよい。File は nio に。読みづらい for は stream に」という指示で実施。
+コードベース全体（Java 1,400 行 + C++ 776 行）を精読し、以下を行った。
+
+#### 発見したバグ（すべて修正済み）
+
+| # | 場所 | 内容 | 影響 |
+|---|---|---|---|
+| A1 | C++ `freeGrammar` | `new` したオブジェクトを `free()` で解放（デストラクタが走らず未定義動作）+ `grammarMap` ではなく **`stateMap` を erase** していた | 文法を使うたびにリーク。ID が偶然一致すると無関係な `whisper_state` がマップから消える。`testFullWithGrammar` が毎回この経路を通っていた |
+| A2 | C++ `vadState` | `freeWhisperFullParams` を呼ばず UTF 文字列 3 本を毎回リーク | メモリリーク |
+| A3 | C++ `vadState` | VAD コンテキストの NULL 未検査 | モデル不正でクラッシュ |
+| A4 | C++ 全体 | 3 つのグローバル map + `rand()` にミューテックス無し | 複数スレッドから context を作るとデータ競合 |
+| A5 | C++ 全体 | `contextMap.at()` が C++ 例外を JVM へ投げる | 解放済みハンドルで未定義動作 |
+| A6 | C++ ログ | 毎行 `AttachCurrentThread` / `DetachCurrentThread` | **アタッチ済みの Java スレッドをデタッチする危険** + オーバーヘッド |
+| A7 | C++ 全体 | `NewStringUTF` / `GetStringUTFChars` は「修正 UTF-8」 | 補助面の文字（絵文字・一部の漢字）を含む文字起こし結果やパスが化ける可能性 |
+| A8 | C++ `full` | `numSamples > samples.length` を検査していない | 配列外読み出し |
+| A9 | C++ セグメント系 | 負の添字を検査していない | 配列外読み出し |
+| A10 | C++ `loadGrammar` | `grammar_parser::parse` は失敗を握りつぶして空を返すのに、それを検出していない | 不正な文法が黙って無視される |
+| A11 | C++ `initFromInputStream` | `InputStream.read` が投げた例外を検査せず無限ループの可能性 | ハング |
+| B1 | Java `GbnfGrammarValidator` | 「root はピリオドで終わる」検査が閉じ引用符のトークンで一度も動かない | `root ::= " hello"` が通っていた（新規テストで発覚） |
+| B2 | Java `WhisperGrammar` | 356 行のうち 300 行が純 Java の GBNF バリデータ（単一責任違反） | 別クラスへ分離済み（3-3 で着手） |
+| B3 | Java | `WhisperVADSegment`（死にコード）、未使用フィールド `grammarText` `WhisperState.context` | 削除 |
+| B4 | Java `getTokens` | セグメント 1 つにつき JNI 呼び出しが 2N+1 回 | 1 回に |
+
+#### 新しいクラス構成
+
+```
+jp.clip.whisper（高水準 API。利用側はここだけ使う）
+├── WhisperEngine        入口（open / transcribe / close）。316 行 ← 436 行
+├── WhisperConfig        設定。Lombok @Value @Builder。148 行 ← 435 行
+├── AudioFileReader      音声ファイル → 16kHz float[]（WhisperEngine から分離）
+├── NativeRuntime        JVM 内で 1 度だけの初期化（ネイティブ読込・VAD モデル展開）（同じく分離。package-private）
+├── TranscriptionResult / Segment（record）
+├── SamplingStrategy     ← WhisperSamplingStrategy を包む
+└── WhisperException
+
+jp.clip.whisperjni（JNI bridge。whisper.cpp と 1 対 1）
+├── WhisperJNI           native 宣言 24 個 + 薄いラッパー
+├── NativeHandle         ハンドル基底（WhisperJNI の内部クラスからトップレベルへ。多重 close 防止をここに集約）
+│   ├── WhisperContext / WhisperState / WhisperGrammar
+├── WhisperTranscriptionParams  ← WhisperFullParams。フィールドを読める名前に（vad_model_path → vadModelPath、nThreads → threads、entropyThold → entropyThreshold 等）、VADParams → VadParams
+├── WhisperContextParams useGPU → useGpu
+├── WhisperSamplingStrategy  定数インタフェース → enum
+├── WhisperToken         ← TokenData。p / plog / t0 / tid 等の暗号的なフィールドを probability / logProbability / startCentiseconds / timestampTokenId に + isSpecial()
+├── NativeLibraryLoader  ← LibraryUtils を分割（ロード順・Vulkan）
+├── BundledResources     ← LibraryUtils を分割（jar 同梱リソースの取り出し）
+├── Platform             ← LibraryUtils を分割（OS / arch 判定。enum）
+└── GbnfGrammarValidator
+```
+
+削除: `LibraryUtils`（3 分割）、`WhisperVADSegment`、`WhisperVADContextParams`、`WhisperJNI#vadState`
+（whisper.cpp 1.9.3 の組み込み VAD `params.vad = true` と重複、かつ A2/A3 のバグ持ち）。
+
+#### C++ の書き直し（`jp_clip_whisperjni_WhisperJNI.cpp`）
+
+- ハンドル表を `HandleTable<T>` テンプレート化（ミューテックス付き、連番採番、型ごとに独立）
+- `requireContext` / `requireState`: 未知のハンドルは `IllegalStateException` として Java へ
+- `FieldReader`: Java フィールドを名前で読む。**Java 側とフィールド名が食い違うと `NoSuchFieldError` として Java に伝わる**（以前はクラッシュ）
+- `Utf8Strings` / `FloatArrayView`: RAII で解放漏れを構造的に防ぐ
+- 文字列は `String(byte[], "UTF-8")` / `getBytes("UTF-8")` 経由（A7 対策）
+- ログは `GetEnv` を先に試し、自分でアタッチしたスレッドだけデタッチ。メソッド ID はキャッシュ、末尾の空白は C++ 側で除去
+- 6 回重複していたセグメント添字チェックをテンプレート 2 本に、`full` / `fullWithState` の文法設定重複を `applyGrammar` に
+- `getSegmentTokens`: トークン列を 1 回の JNI 呼び出しで `WhisperToken[]` にして返す
+- `// START SUPASULLEY EPIC METHODS` 等の落書きコメントを除去し、冒頭に設計方針を記載
+
+#### Java 側の方針変更
+
+- **Lombok 導入**（`io.freefair.lombok` 9.5.0 / Lombok 1.18.48、compileOnly）。`WhisperConfig` の 20 項目は
+  「フィールド + Javadoc」を 1 箇所書けばビルダーとアクセサが揃う（以前は 5 箇所）。`toBuilder()` も生えた
+- **`java.io.File` 全廃**（`Files.isRegularFile` / `Files.newInputStream` / `Files.list` に置換）
+- 変換・集約のループを Stream に（`TranscriptionResult.text()`、`NativeLibraryLoader` の並べ替え、
+  `WhisperEngine.collectSegments`、`AudioFileReader` など）
+- コーディング規約を `CLAUDE.md` に追記（var 禁止 / nio / stream / ライブラリ方針 / JNI との結びつき表）
+- 実行時依存は追加していない（Apache Commons は不要と判断: `String.isBlank` 等の Java 17 標準で足りる。
+  transcribe-shell の依存を増やさない）
+- whisper.cpp 自身のログは SLF4J ロガー名 **`whisper.cpp`** に出す（`logging.level.whisper.cpp=WARN` で抑制可能）
+
+#### 命名の見直し（2 回目の指示「わかりづらいクラス名・メソッド名はリネーム」で追加）
+
+方針: 略語と whisper.cpp の C 名（`fullNSegments` `nThreads` `TokenData.p`）を Java 側の識別子から追い出し、
+対応する C 名は Javadoc に併記する。`private native` メソッドだけは C++ シンボルと結びついているので
+whisper.cpp 寄りの名前のまま（`CLAUDE.md` の命名ルール参照）。Apache Commons IO は使わない
+（`Files.copy` / `readAllBytes` / `Path.getFileName` で全部足りる。実行時依存が transcribe-shell に伝播する）。
+
+#### 公開 API の変更点（1.9.3-1 は未公開なので互換性の問題なし）
+
+| 旧 | 新 |
+|---|---|
+| `whisper.loadLibrary()` | `WhisperJNI.loadBundledLibraries()`（static） |
+| `LibraryUtils.loadLibrary(logger, dir)` | `NativeLibraryLoader.load(logger, dir)` |
+| `LibraryUtils.findAndLoadVulkanRuntime()` | `NativeLibraryLoader.loadVulkanRuntimeIfPresent()` |
+| `LibraryUtils.exportVADModel(logger, path)` | `BundledResources.exportVadModel(logger, path)` |
+| `LibraryUtils.getOS()` / `getArchitecture()` | `Platform.current()` / `Platform.architecture()` |
+| `params.vad_model_path`、`vadParams.min_speech_duration_ms` 等 | `params.vadModelPath`、`vadParams.minSpeechDurationMs` 等（camelCase） |
+| `WhisperFullParams` / `.VADParams` | `WhisperTranscriptionParams` / `.VadParams` |
+| `TokenData`（`token` `p` `plog` `pt` `ptsum` `t0` `t1` `t_dtw` `vlen` `tid`） | `WhisperToken`（`text` `probability` `logProbability` `timestampProbability` `timestampProbabilitySum` `startCentiseconds` `endCentiseconds` `dtwCentiseconds` `voiceLength` `timestampTokenId`） |
+| `WhisperJNI.init` / `initNoState` / `initState` / `initOpenVINO` | `createContext` / `createContextWithoutState` / `createState` / `initOpenVinoEncoder` |
+| `WhisperJNI.full` / `fullWithState` | `transcribe` / `transcribeWithState` |
+| `fullNSegments` / `fullGetSegmentTimestamp0` / `fullGetSegmentTimestamp1` / `fullGetSegmentText` / `getTokens`（+ `FromState`） | `segmentCount` / `segmentStartCentiseconds` / `segmentEndCentiseconds` / `segmentText` / `segmentTokens`（+ `FromState`） |
+| `WhisperFullParams.nThreads` `audioCtx` `nMaxTextCtx` `maxInitialTs` `temperatureInc` `entropyThold` `logprobThold` `noSpeechThold` `beamSearchBeamSize` `beamSearchPatience` `vad` | `threads` `audioContextSize` `maxTextContextTokens` `maxInitialTimestampSeconds` `temperatureIncrement` `entropyThreshold` `logProbabilityThreshold` `noSpeechThreshold` `beamSize` `beamPatience` `vadEnabled` |
+| `WhisperConfig.vad(boolean)` / `translate(boolean)` | `vadEnabled(boolean)` / `translateToEnglish(boolean)` |
+| `Platform.resourceDirectory()` | `nativeLibraryDirectoryName()` |
+| `NativeHandle.ref` | `nativeId` |
+| `new WhisperFullParams(int)` | `new WhisperTranscriptionParams(WhisperSamplingStrategy)`。引数なしは GREEDY（旧 BEAM_SEARCH） |
+| `WhisperContextParams.useGPU` | `useGpu` |
+| `WhisperEngine.readAudioSamples(path)` | `AudioFileReader.readSamples(path)` |
+| `WhisperConfig.Builder` | `WhisperConfig.WhisperConfigBuilder`（Lombok 生成） |
+| `WhisperConfig.builder().build()`（model 未設定） | `WhisperException` → `NullPointerException`（Lombok `@NonNull`） |
+| 解放済みハンドル使用時の例外 | `RuntimeException` → `IllegalStateException`（サブクラスなのでテストは通る。メッセージ不変） |
+
+#### 検証結果（クラウド Linux x86_64、JDK 21、実モデル ggml-tiny.bin）
+
+| 項目 | 結果 |
+|---|---|
+| `javac -Xlint:all --release 17` | 警告 0（クラウド JDK 21 と、PC 側 VM の JDK 25.0.4.1 + slf4j-api 2.0.16 実物の両方で確認） |
+| `javadoc`（delombok 後、`-Xdoclint:all,-missing`） | エラー 0・警告 0 |
+| JNI シンボル（ヘッダ vs `nm -D`） | **24 / 24 一致** |
+| `GbnfGrammarValidatorTest` | 13 / 13 |
+| `WhisperJNITest` | 19 / 19（新規 3: 負の添字、`numSamples` 超過、不正文法の拒否） |
+| `WhisperEngineTest` | 16 / 16（新規 1: `toBuilder`） |
+| 文字起こし文字列の完全一致 | 旧実装と同一（`" And so my fellow Americans ask not ..."` GREEDY / BEAM_SEARCH / grammar / state 版すべて） |
+| UTF-8 往復 | `モデル𠮷野家😀.bin` というパスのモデルを読み、whisper.cpp のログ経由で同じ文字列が Java に戻ることを確認（補助面の文字含む） |
+| 並行性 | 8 スレッド × 5 回の context/state/grammar 生成・実行・解放 = 40 / 40 成功 |
+| ログ経路 | whisper.cpp のログが SLF4J `whisper.cpp` ロガーに届き、末尾の空白・改行が除去されている |
+
+Windows での検証手順は「Step 3-4 の Windows 手順」（本ファイル末尾）を参照。
+
 ---
 
 ## Step 4 — ⑧ Javadoc の完全日本語化
@@ -652,7 +781,7 @@ Step 2 で作った `WhisperEngine` に簡易ベンチ（音声長 / 処理時�
 | 1 | **GPU バックエンド（Vulkan / CUDA）** | 最大。数倍〜十数倍 | CI で既に Vulkan natives をビルド済み。Windows に GPU があれば最優先 |
 | 2 | **モデルを `large-v3-turbo` 系の量子化版へ** | 大。速度/精度比が非常に良い | `ggml-large-v3-turbo-q5_0.bin` など。`q8_0` は精度寄り、`q5_0` は速度寄り |
 | 3 | **VAD で無音を落とす** | 長い録音ほど大。無音が半分なら処理も半分 | `params.vad = true` + silero v6.2.0。今回 jfk.wav で 3 区間検出を実測済み |
-| 4 | **スレッド数を物理コア数に合わせる** | 中。デフォルトは 4 なので余裕があることが多い | `WhisperFullParams.nThreads` |
+| 4 | **スレッド数を物理コア数に合わせる** | 中。デフォルトは 4 なので余裕があることが多い | `WhisperConfig.threads` |
 | 5 | **BEAM_SEARCH → GREEDY** | 中。精度とのトレードオフ | 日本語の精度低下が許容できるか要判断 |
 | 6 | **`audio_ctx` の縮小** | 短い音声で中 | 30秒より短い音声なら encoder のコンテキストを削れる |
 | 7 | **flash attention** | — | **1.9.3 では既に有効**（起動ログに `flash attn = 1` が出ています）。作業不要 |
@@ -760,3 +889,77 @@ Step 6  dev 削除 / main へ統合 / ~/.m2 掃除
 
 各 Step の完了条件は「`gradlew test` が全件パス」です。ここを毎回守れば、
 どこで壊れたかが必ず1 Step 以内に絞れます。
+
+---
+
+## Step 3-4 の Windows 手順（リファクタリング後の検証とコミット）
+
+クラウド側では Linux で全テストが通っています。Windows では **ネイティブを作り直してから** テストします
+（C++ を書き直しているので、古い `whisper-jni.dll` のままだと `UnsatisfiedLinkError` になります）。
+リネーム（`git mv`）と `LibraryUtils.java` の `git rm` はクラウド側から実行済みなので、手元では
+ビルド → テスト → コミットだけです。
+
+```powershell
+cd C:\pr-work\whisper-jni-custom
+
+# 1. 状態確認。R（リネーム）2 件、D 3 件、新規 ?? 9 件、M 多数 が見えるはず
+git status --short
+
+# 2. ネイティブを作り直す
+Remove-Item -Recurse -Force .\build -ErrorAction SilentlyContinue
+.\scripts\build-windows.ps1
+
+# 3. シンボルの突き合わせ（Developer PowerShell で）。Count が 24 になること
+dumpbin /exports .\whisperjni-build\whisper-jni.dll | Select-String "Java_" | Measure-Object
+
+# 4. テスト。初回は Lombok と io.freefair.lombok プラグインをダウンロードするので少し時間がかかる
+$env:GRADLE_USER_HOME = "C:\pr-work\.gradle-home"
+.\gradlew.bat clean test
+#   期待: 13 + 19 + 16 = 48 tests, 0 failures
+
+# 5. コミットとプッシュ
+git add -A
+git status --short          # 全部ステージされたこと（先頭 2 文字目が空白）を確認
+git commit -F .git\COMMIT_MSG.txt   # ← 下のコミット文を保存して使う。または -m で 1 行目だけでもよい
+git push
+```
+
+コミット文（`.git\COMMIT_MSG.txt` に保存するか、1 行目だけ `-m` で）:
+
+```
+Step 3-4: クラス構成の全面見直しと JNI C++ の書き直し
+
+Java
+- LibraryUtils を NativeLibraryLoader / BundledResources / Platform に分割
+- WhisperEngine から AudioFileReader / NativeRuntime を分離
+- ハンドル基底を NativeHandle としてトップレベル化（多重 close 防止を集約）
+- WhisperFullParams -> WhisperTranscriptionParams、TokenData -> WhisperToken。
+  フィールド・メソッド名を読める名前に統一（nThreads -> threads、fullNSegments -> segmentCount 等）
+- WhisperSamplingStrategy を定数インタフェースから enum に
+- Lombok 導入（WhisperConfig を @Value @Builder に。435 行 -> 148 行）
+- java.io.File を全廃し java.nio.file に統一、変換・集約のループを Stream に
+- 死にコード削除: WhisperVADSegment、WhisperVADContextParams、vadState
+- GbnfGrammarValidator: 閉じ引用符トークンで終端検査が動いていなかった不具合を修正
+
+C++（全面書き直し）
+- freeGrammar: free() -> delete、stateMap ではなく grammarMap から erase
+- ハンドル表をミューテックス付き HandleTable<T> に。未知のハンドルは IllegalStateException
+- 文字列を String(byte[], "UTF-8") 経由に（NewStringUTF の修正 UTF-8 問題を回避）
+- ログ転送: GetEnv を先に試し、自分でアタッチしたスレッドだけデタッチ
+- numSamples 超過・負の添字・不正文法・InputStream の例外を検査
+- トークン列を 1 回の JNI 呼び出しで返す getSegmentTokens
+
+ビルド・ドキュメント
+- io.freefair.lombok 9.5.0 / Lombok 1.18.48、lombok.config、javadoc の doclint 設定
+- CLAUDE.md に nio / stream / ライブラリ / 命名のルールを追記
+- README と WINDOWS-BUILD-1.9.3.md を更新
+
+検証: Linux で 48 テスト全件パス（実モデル）、JNI シンボル 24/24、UTF-8 往復、8 スレッド並行 40/40
+```
+
+**IDE（STS / Eclipse）で赤線が出る場合**: `WhisperConfig` の `builder()` や `model()` が見つからないのは
+IDE に Lombok が入っていないためで、ビルドの問題ではありません。`~/.m2/repository/org/projectlombok/lombok/1.18.46/lombok-1.18.46.jar`
+を `java -jar` で実行してインストーラから STS を指定してください。
+
+**もし `Plugin [id: 'io.freefair.lombok', version: '9.5.0'] was not found` で落ちたら**: jreleaser プラグインと
+同じ Gradle Plugin Portal から取得するので、ネットワーク（プロキシ）の問題です。§5 の jreleaser の項と同じ対処をしてください。

@@ -2,6 +2,8 @@ plugins {
     id 'java-library'
     id 'maven-publish'
     id 'org.jreleaser' version '1.26.0'
+    // Lombok: compileOnly / annotationProcessor の配線と、javadoc 用の delombok を自動設定する
+    id 'io.freefair.lombok' version '9.5.0'
 }
 
 group = 'jp.clip'
@@ -11,6 +13,11 @@ description = 'JNI bindings for whisper.cpp (v1.9.3). Derived from whisper-jni b
 repositories {
     mavenLocal()
     mavenCentral()
+}
+
+lombok {
+    // JDK 25 でビルドするには 1.18.40 以上が必要
+    version = '1.18.48'
 }
 
 dependencies {
@@ -47,6 +54,11 @@ tasks.withType(JavaCompile).configureEach {
 tasks.withType(Javadoc).configureEach {
     options.encoding = 'UTF-8'
     options.source = '17'
+    // 日本語 Javadoc が化けないように出力側の文字コードも固定する
+    options.docEncoding = 'UTF-8'
+    options.charSet = 'UTF-8'
+    // Lombok が生成するアクセサには @return / @param が付かないので "missing" だけ doclint から外す
+    options.addStringOption('Xdoclint:all,-missing', '-quiet')
 }
 
 // Apache-2.0 では、配布物に LICENSE と NOTICE を含める必要がある。
@@ -140,8 +152,11 @@ tasks.register('generateHeaders', JavaCompile) {
     group = 'whisper-jni'
     description = 'Regenerates the JNI headers in src/main/native/jni from the Java native declarations'
 
-    source = fileTree('src/main/java')
+    // native 宣言があるのは JNI bridge 層だけなので、その package だけをコンパイルする。
+    // （Lombok を使う jp.clip.whisper を含めると annotation processor の配線も必要になる）
+    source = fileTree('src/main/java/jp/clip/whisperjni')
     classpath = sourceSets.main.compileClasspath
+    options.annotationProcessorPath = configurations.annotationProcessor
     destinationDirectory.set(layout.buildDirectory.dir('generated/jni-headers'))
     options.headerOutputDirectory.set(file('src/main/native/jni'))
 }

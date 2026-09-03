@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -38,19 +37,18 @@ public class WhisperEngineTest
 	@BeforeAll
 	public static void beforeAll()
 	{
-		File modelFile = MODEL_PATH.toFile();
-		if (!modelFile.isFile())
+		if(!Files.isRegularFile(MODEL_PATH))
 		{
 			throw new IllegalStateException("モデルがありません: " + MODEL_PATH.toAbsolutePath()
 					+ " / scripts/download-test-model を先に実行してください。");
 		}
-		if (!SAMPLE_PATH.toFile().isFile())
+		if(!Files.isRegularFile(SAMPLE_PATH))
 		{
 			throw new IllegalStateException("サンプル音声がありません: " + SAMPLE_PATH.toAbsolutePath());
 		}
 
 		Path buildDirectory = Path.of("whisperjni-build");
-		if (Files.isDirectory(buildDirectory))
+		if(Files.isDirectory(buildDirectory))
 		{
 			LOG.info("ビルド出力からネイティブを読み込みます: {}", buildDirectory);
 			nativeDirectory = buildDirectory;
@@ -61,12 +59,12 @@ public class WhisperEngineTest
 		}
 	}
 
-	private static WhisperConfig.Builder baseConfig()
+	private static WhisperConfig.WhisperConfigBuilder baseConfig()
 	{
-		WhisperConfig.Builder builder = WhisperConfig.builder()
+		WhisperConfig.WhisperConfigBuilder builder = WhisperConfig.builder()
 				.model(MODEL_PATH)
 				.language("en");
-		if (nativeDirectory != null)
+		if(nativeDirectory != null)
 		{
 			builder.nativeLibraryDirectory(nativeDirectory);
 		}
@@ -76,9 +74,21 @@ public class WhisperEngineTest
 	@Test
 	public void builderRequiresModel()
 	{
-		WhisperException exception = assertThrows(WhisperException.class,
-				() -> WhisperConfig.builder().build());
-		assertNotNull(exception);
+		// model は @NonNull。Lombok が生成する null チェックは NullPointerException を投げる
+		NullPointerException exception = assertThrows(NullPointerException.class, () -> WhisperConfig.builder().build());
+		assertTrue(exception.getMessage().contains("model"), exception.getMessage());
+	}
+
+	@Test
+	public void toBuilderCopiesEverySetting()
+	{
+		WhisperConfig original = WhisperConfig.builder().model(MODEL_PATH).language("ja").threads(3).vadEnabled(true).build();
+		WhisperConfig derived = original.toBuilder().samplingStrategy(SamplingStrategy.BEAM_SEARCH).build();
+		assertEquals("ja", derived.language());
+		assertEquals(3, derived.threads());
+		assertTrue(derived.vadEnabled());
+		assertEquals(SamplingStrategy.BEAM_SEARCH, derived.samplingStrategy());
+		assertEquals(SamplingStrategy.GREEDY, original.samplingStrategy(), "元の設定は変わらない");
 	}
 
 	@Test
@@ -87,8 +97,8 @@ public class WhisperEngineTest
 		WhisperConfig config = WhisperConfig.builder().model(MODEL_PATH).build();
 		assertEquals("en", config.language());
 		assertEquals(SamplingStrategy.GREEDY, config.samplingStrategy());
-		assertFalse(config.vad());
-		assertFalse(config.translate());
+		assertFalse(config.vadEnabled());
+		assertFalse(config.translateToEnglish());
 		assertTrue(config.useGpu());
 		assertEquals(0, config.threads());
 	}
@@ -105,18 +115,18 @@ public class WhisperEngineTest
 	@Test
 	public void readAudioSamplesWithMissingFileFails()
 	{
-		assertThrows(WhisperException.class, () -> WhisperEngine.readAudioSamples(Path.of("no-such.wav")));
+		assertThrows(WhisperException.class, () -> AudioFileReader.readSamples(Path.of("no-such.wav")));
 	}
 
 	@Test
 	public void readAudioSamplesReturnsSixteenKilohertzMono()
 	{
-		float[] samples = WhisperEngine.readAudioSamples(SAMPLE_PATH);
+		float[] samples = AudioFileReader.readSamples(SAMPLE_PATH);
 		assertTrue(samples.length > 0);
 		// jfk.wav は約 11 秒。16kHz モノラルなら 16000 * 11 前後になる
 		assertTrue(samples.length > WhisperEngine.SAMPLE_RATE * 5,
 				"サンプル数が少なすぎます: " + samples.length);
-		for (float sample : samples)
+		for(float sample : samples)
 		{
 			assertTrue(sample >= -1.0f && sample <= 1.0f, "正規化されていません: " + sample);
 		}
@@ -125,8 +135,8 @@ public class WhisperEngineTest
 	@Test
 	public void transcribeFromSampleArray()
 	{
-		float[] samples = WhisperEngine.readAudioSamples(SAMPLE_PATH);
-		try (WhisperEngine engine = WhisperEngine.open(baseConfig().build()))
+		float[] samples = AudioFileReader.readSamples(SAMPLE_PATH);
+		try(WhisperEngine engine = WhisperEngine.open(baseConfig().build()))
 		{
 			TranscriptionResult result = engine.transcribe(samples);
 			assertFalse(result.isEmpty(), "セグメントが空です");
@@ -140,7 +150,7 @@ public class WhisperEngineTest
 	@Test
 	public void transcribeFromAudioFile()
 	{
-		try (WhisperEngine engine = WhisperEngine.open(baseConfig().build()))
+		try(WhisperEngine engine = WhisperEngine.open(baseConfig().build()))
 		{
 			TranscriptionResult result = engine.transcribe(SAMPLE_PATH);
 			assertFalse(result.isEmpty());
@@ -152,7 +162,7 @@ public class WhisperEngineTest
 	@Test
 	public void timestampsAreInMilliseconds()
 	{
-		try (WhisperEngine engine = WhisperEngine.open(baseConfig().build()))
+		try(WhisperEngine engine = WhisperEngine.open(baseConfig().build()))
 		{
 			TranscriptionResult result = engine.transcribe(SAMPLE_PATH);
 			List<Segment> segments = result.segments();
@@ -173,7 +183,7 @@ public class WhisperEngineTest
 	@Test
 	public void transcribeWithBeamSearch()
 	{
-		try (WhisperEngine engine = WhisperEngine
+		try(WhisperEngine engine = WhisperEngine
 				.open(baseConfig().samplingStrategy(SamplingStrategy.BEAM_SEARCH).build()))
 		{
 			TranscriptionResult result = engine.transcribe(SAMPLE_PATH);
@@ -184,11 +194,11 @@ public class WhisperEngineTest
 	@Test
 	public void transcribeWithVad()
 	{
-		try (WhisperEngine engine = WhisperEngine.open(baseConfig().vad(true).vadThreshold(0.5f).build()))
+		try(WhisperEngine engine = WhisperEngine.open(baseConfig().vadEnabled(true).vadThreshold(0.5f).build()))
 		{
 			TranscriptionResult result = engine.transcribe(SAMPLE_PATH);
 			LOG.info("VAD 有効時のセグメント数: {}", result.segments().size());
-			for (Segment segment : result.segments())
+			for(Segment segment : result.segments())
 			{
 				assertTrue(segment.endMs() >= segment.startMs());
 			}
@@ -200,7 +210,7 @@ public class WhisperEngineTest
 	{
 		String grammar = "root ::= \" And so, my fellow Americans, ask not what your country can do for you,"
 				+ " ask what you can do for your country.\"";
-		try (WhisperEngine engine = WhisperEngine.open(baseConfig().grammar(grammar).build()))
+		try(WhisperEngine engine = WhisperEngine.open(baseConfig().grammar(grammar).build()))
 		{
 			TranscriptionResult result = engine.transcribe(SAMPLE_PATH);
 			assertFalse(result.isEmpty());
@@ -211,7 +221,7 @@ public class WhisperEngineTest
 	@Test
 	public void systemInfoIsNotBlank()
 	{
-		try (WhisperEngine engine = WhisperEngine.open(baseConfig().build()))
+		try(WhisperEngine engine = WhisperEngine.open(baseConfig().build()))
 		{
 			String info = engine.systemInfo();
 			assertNotNull(info);
@@ -223,7 +233,7 @@ public class WhisperEngineTest
 	@Test
 	public void modelIsMultilingual()
 	{
-		try (WhisperEngine engine = WhisperEngine.open(baseConfig().build()))
+		try(WhisperEngine engine = WhisperEngine.open(baseConfig().build()))
 		{
 			assertTrue(engine.isMultilingual());
 		}
@@ -242,7 +252,7 @@ public class WhisperEngineTest
 	@Test
 	public void emptySamplesReturnEmptyResult()
 	{
-		try (WhisperEngine engine = WhisperEngine.open(baseConfig().build()))
+		try(WhisperEngine engine = WhisperEngine.open(baseConfig().build()))
 		{
 			TranscriptionResult result = engine.transcribe(new float[0]);
 			assertTrue(result.isEmpty());

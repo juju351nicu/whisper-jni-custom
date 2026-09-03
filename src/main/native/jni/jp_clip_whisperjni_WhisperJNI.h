@@ -66,7 +66,7 @@ JNIEXPORT jboolean JNICALL Java_jp_clip_whisperjni_WhisperJNI_isMultilingual
 /*
  * Class:     jp_clip_whisperjni_WhisperJNI
  * Method:    full
- * Signature: (ILjp/clip/whisperjni/WhisperFullParams;[FI)I
+ * Signature: (ILjp/clip/whisperjni/WhisperTranscriptionParams;[FI)I
  */
 JNIEXPORT jint JNICALL Java_jp_clip_whisperjni_WhisperJNI_full
   (JNIEnv *, jobject, jint, jobject, jfloatArray, jint);
@@ -74,50 +74,10 @@ JNIEXPORT jint JNICALL Java_jp_clip_whisperjni_WhisperJNI_full
 /*
  * Class:     jp_clip_whisperjni_WhisperJNI
  * Method:    fullWithState
- * Signature: (IILjp/clip/whisperjni/WhisperFullParams;[FI)I
+ * Signature: (IILjp/clip/whisperjni/WhisperTranscriptionParams;[FI)I
  */
 JNIEXPORT jint JNICALL Java_jp_clip_whisperjni_WhisperJNI_fullWithState
   (JNIEnv *, jobject, jint, jint, jobject, jfloatArray, jint);
-
-/*
- * Class:     jp_clip_whisperjni_WhisperJNI
- * Method:    fullNTokens
- * Signature: (II)I
- */
-JNIEXPORT jint JNICALL Java_jp_clip_whisperjni_WhisperJNI_fullNTokens
-  (JNIEnv *, jobject, jint, jint);
-
-/*
- * Class:     jp_clip_whisperjni_WhisperJNI
- * Method:    fullNTokensFromState
- * Signature: (II)I
- */
-JNIEXPORT jint JNICALL Java_jp_clip_whisperjni_WhisperJNI_fullNTokensFromState
-  (JNIEnv *, jobject, jint, jint);
-
-/*
- * Class:     jp_clip_whisperjni_WhisperJNI
- * Method:    getTokenData
- * Signature: (III)Ljp/clip/whisperjni/TokenData;
- */
-JNIEXPORT jobject JNICALL Java_jp_clip_whisperjni_WhisperJNI_getTokenData
-  (JNIEnv *, jobject, jint, jint, jint);
-
-/*
- * Class:     jp_clip_whisperjni_WhisperJNI
- * Method:    getTokenDataFromState
- * Signature: (IIII)Ljp/clip/whisperjni/TokenData;
- */
-JNIEXPORT jobject JNICALL Java_jp_clip_whisperjni_WhisperJNI_getTokenDataFromState
-  (JNIEnv *, jobject, jint, jint, jint, jint);
-
-/*
- * Class:     jp_clip_whisperjni_WhisperJNI
- * Method:    vadState
- * Signature: (IILjp/clip/whisperjni/WhisperFullParams;Ljp/clip/whisperjni/WhisperVADContextParams;[FI)Ljava/lang/String;
- */
-JNIEXPORT jstring JNICALL Java_jp_clip_whisperjni_WhisperJNI_vadState
-  (JNIEnv *, jobject, jint, jint, jobject, jobject, jfloatArray, jint);
 
 /*
  * Class:     jp_clip_whisperjni_WhisperJNI
@@ -185,6 +145,30 @@ JNIEXPORT jstring JNICALL Java_jp_clip_whisperjni_WhisperJNI_fullGetSegmentTextF
 
 /*
  * Class:     jp_clip_whisperjni_WhisperJNI
+ * Method:    getSegmentTokens
+ * Signature: (II)[Ljp/clip/whisperjni/WhisperToken;
+ */
+JNIEXPORT jobjectArray JNICALL Java_jp_clip_whisperjni_WhisperJNI_getSegmentTokens
+  (JNIEnv *, jobject, jint, jint);
+
+/*
+ * Class:     jp_clip_whisperjni_WhisperJNI
+ * Method:    getSegmentTokensFromState
+ * Signature: (III)[Ljp/clip/whisperjni/WhisperToken;
+ */
+JNIEXPORT jobjectArray JNICALL Java_jp_clip_whisperjni_WhisperJNI_getSegmentTokensFromState
+  (JNIEnv *, jobject, jint, jint, jint);
+
+/*
+ * Class:     jp_clip_whisperjni_WhisperJNI
+ * Method:    printSystemInfo
+ * Signature: ()Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_jp_clip_whisperjni_WhisperJNI_printSystemInfo
+  (JNIEnv *, jobject);
+
+/*
+ * Class:     jp_clip_whisperjni_WhisperJNI
  * Method:    freeContext
  * Signature: (I)V
  */
@@ -206,14 +190,6 @@ JNIEXPORT void JNICALL Java_jp_clip_whisperjni_WhisperJNI_freeState
  */
 JNIEXPORT void JNICALL Java_jp_clip_whisperjni_WhisperJNI_freeGrammar
   (JNIEnv *, jobject, jint);
-
-/*
- * Class:     jp_clip_whisperjni_WhisperJNI
- * Method:    printSystemInfo
- * Signature: ()Ljava/lang/String;
- */
-JNIEXPORT jstring JNICALL Java_jp_clip_whisperjni_WhisperJNI_printSystemInfo
-  (JNIEnv *, jobject);
 
 /*
  * Class:     jp_clip_whisperjni_WhisperJNI

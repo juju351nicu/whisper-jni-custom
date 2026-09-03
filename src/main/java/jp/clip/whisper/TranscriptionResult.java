@@ -1,6 +1,7 @@
 package jp.clip.whisper;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * 文字起こしの結果全体。
@@ -12,7 +13,7 @@ import java.util.List;
  * <pre>
  * TranscriptionResult result = engine.transcribe(wav);
  * System.out.println(result.text());
- * for (Segment segment : result.segments())
+ * for(Segment segment : result.segments())
  * {
  * 	System.out.printf("[%d-%d] %s%n", segment.startMs(), segment.endMs(), segment.text());
  * }
@@ -38,12 +39,10 @@ public record TranscriptionResult(List<Segment> segments, long elapsedMs)
 	 */
 	public String text()
 	{
-		StringBuilder builder = new StringBuilder();
-		for (Segment segment : this.segments)
-		{
-			builder.append(segment.text());
-		}
-		return builder.toString().strip();
+		return this.segments.stream()
+				.map(Segment::text)
+				.collect(Collectors.joining())
+				.strip();
 	}
 
 	/**
@@ -68,12 +67,12 @@ public record TranscriptionResult(List<Segment> segments, long elapsedMs)
 	 */
 	public double realTimeFactor()
 	{
-		if (this.segments.isEmpty())
+		if(this.segments.isEmpty())
 		{
 			return Double.NaN;
 		}
 		long audioMs = this.segments.get(this.segments.size() - 1).endMs();
-		if (audioMs <= 0L)
+		if(audioMs <= 0L)
 		{
 			return Double.NaN;
 		}

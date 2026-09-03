@@ -6,35 +6,32 @@ import jp.clip.whisperjni.WhisperSamplingStrategy;
  * デコード時のサンプリング戦略。
  *
  * <p>
- * 低レイヤの {@link WhisperSamplingStrategy} の int 定数を型安全に包んだものです。
+ * 低レイヤの {@link WhisperSamplingStrategy} と 1 対 1 で対応しますが、利用側が
+ * {@code jp.clip.whisperjni} パッケージを import しなくて済むようにこの層で定義しています。
  * </p>
  */
 public enum SamplingStrategy
 {
-	/**
-	 * 貪欲法。高速で、多くの用途ではこちらで十分です。
-	 */
+	/** 貪欲法。高速で、多くの用途ではこちらで十分です。 */
 	GREEDY(WhisperSamplingStrategy.GREEDY),
 
-	/**
-	 * ビームサーチ。GREEDY より低速ですが、句読点などの精度が上がることがあります。
-	 */
+	/** ビームサーチ。GREEDY より低速ですが、句読点などの精度が上がることがあります。 */
 	BEAM_SEARCH(WhisperSamplingStrategy.BEAM_SEARCH);
 
-	private final int nativeValue;
+	private final WhisperSamplingStrategy bridgeValue;
 
-	SamplingStrategy(int nativeValue)
+	SamplingStrategy(WhisperSamplingStrategy bridgeValue)
 	{
-		this.nativeValue = nativeValue;
+		this.bridgeValue = bridgeValue;
 	}
 
 	/**
-	 * whisper.cpp に渡す int 値を返します。
+	 * 対応する低レイヤの列挙値を返します。
 	 *
-	 * @return whisper.cpp の sampling strategy 値
+	 * @return {@link WhisperSamplingStrategy}
 	 */
-	public int nativeValue()
+	public WhisperSamplingStrategy toBridge()
 	{
-		return this.nativeValue;
+		return this.bridgeValue;
 	}
 }

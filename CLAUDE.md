@@ -9,45 +9,109 @@
 
 ### Java
 
-**`var`（ローカル変数の型推論）を使わない。必ず明示的な型を書く。**
+**1. `var`（ローカル変数の型推論）を使わない。必ず明示的な型を書く。**
 人間が読んだときに型がすぐ分からないのを避けるためです。
 
 ```java
 // NG
-var ctx = whisper.init(model);
-var params = new WhisperFullParams(WhisperSamplingStrategy.GREEDY);
+var ctx = whisper.createContext(model);
+var params = new WhisperTranscriptionParams(WhisperSamplingStrategy.GREEDY);
 
 // OK
-WhisperContext ctx = whisper.init(model);
-WhisperFullParams params = new WhisperFullParams(WhisperSamplingStrategy.GREEDY);
+WhisperContext ctx = whisper.createContext(model);
+WhisperTranscriptionParams params = new WhisperTranscriptionParams(WhisperSamplingStrategy.GREEDY);
 ```
 
-その他:
+**2. ファイル操作は `java.nio.file`（`Path` / `Files`）を使う。`java.io.File` は使わない。**
+`toFile()` で `File` に落とすのも避ける。`File` しか受け付けない API（例 `AudioSystem`）には
+`Files.newInputStream` で開いたストリームを渡す。
+
+```java
+// NG
+File model = path.toFile();
+if(!model.exists() || !model.isFile()) { ... }
+AudioSystem.getAudioInputStream(path.toFile());
+
+// OK
+if(!Files.isRegularFile(path)) { ... }
+AudioSystem.getAudioInputStream(new BufferedInputStream(Files.newInputStream(path)));
+```
+
+**3. 読みづらい `for` / `while` は Stream API に置き換える。**
+「配列やリストを走査して、変換・絞り込み・集約する」ループは Stream の方が意図が読み取れる。
+逆に、添字を複雑に操作する状態機械（`GbnfGrammarValidator` の字句解析など）や
+早期 `return` / `break` が要るループは、無理に Stream にしない。
+
+```java
+// NG
+StringBuilder builder = new StringBuilder();
+for(Segment segment : segments) { builder.append(segment.text()); }
+return builder.toString().strip();
+
+// OK
+return segments.stream().map(Segment::text).collect(Collectors.joining()).strip();
+```
+
+**4. ライブラリの方針**
+
+| ライブラリ | 扱い |
+|---|---|
+| Lombok | **使う**（`compileOnly`、利用側に影響しない）。ボイラープレートが明確に減る場所で。現在は `WhisperConfig`（`@Value` `@Builder`）と `NativeRuntime`（`@Slf4j`） |
+| Apache Commons 等の実行時依存 | **原則入れない**。この jar を使うアプリ（transcribe-shell など）の依存関係を増やすため。Java 17 標準（`String.isBlank` `strip` `Files` `Stream`）で足りることがほとんど |
+| SLF4J | 唯一の実行時依存（`api`）。ロガー実装は利用側が選ぶ |
+
+Lombok を使う際の注意:
+- JNI が `GetFieldID` で読むクラス（`WhisperTranscriptionParams` `WhisperContextParams` `WhisperToken`）には
+  **使わない**。フィールド名・型が C++ と結びついているので、生成コードで隠さない。
+- `@Builder` のクラスでは必須項目に `@NonNull` を付ける（未設定なら `build()` で `NullPointerException`）。
+- Javadoc はフィールドに書く。Lombok が生成するアクセサ / ビルダーメソッドへ複製される。
+
+**5. 命名**
+
+- 略語や whisper.cpp の C 名をそのまま Java の識別子にしない。読めば意味が分かる名前を付け、
+  対応する C 名は Javadoc に併記する（例: `nThreads` → `threads`、`entropyThold` → `entropyThreshold`、
+  `fullNSegments` → `segmentCount`、`TokenData.p` → `probability`）。
+- 例外は **`private native` メソッド**。これは C++ のシンボル名と結びついているので whisper.cpp の
+  関数名に近い名前のままにし、public のラッパー側で読みやすい名前を付ける。
+- 単位はメソッド名・フィールド名に含める（`segmentStartCentiseconds`、`vadMinSpeechDurationMs`）。
+- 生成・取得の動詞: 新しいネイティブオブジェクトを作るなら `create〜`、既存の値を読むなら名詞（`segmentText`）。
+
+**6. その他**
 
 - 公開 API のバイトコードターゲットは **Java 17**（`build.gradle` の `options.release = 17`）。
   ビルド自体は Java 25 で行うが、利用側に 17 より新しい JDK を要求しない。
 - **既存クラスを record に変換しない。** フィールドアクセス `x.field` がアクセサ `x.field()` に
-  変わるため、公開 API の破壊的変更になる。
+  変わるため、公開 API の破壊的変更になる。新規の値クラスは record でよい（`Segment` など）。
+- 波括弧は次の行（Allman）。`if(` `for(` `catch(` は括弧の前にスペースを入れない。インデントはタブ。
 - **Javadoc は日本語で書く。**
   - `jp.clip.whisper`（自作 API 層）: 使い方の例を添える
-  - `jp.clip.whisperjni`（JNI bridge 層）: 対応する whisper.cpp の関数名を必ず併記する
+  - `jp.clip.whisperjni`（JNI bridge 層）: 対応する whisper.cpp の関数名・構造体メンバー名を必ず併記する
     （whisper.cpp を更新するときの影響調査資料になる）
 - **例外メッセージの文字列を変更しない。** テストが文字列一致で検証している
   （例: `"Index out of range"`, `"Unavailable pointer, object is closed"`）。
-- テストの期待値（文字起こし結果の文字列・タイムスタンプ）は whisper.cpp のバージョンに
-  依存する。whisper.cpp 更新時にこれらが落ちたら、まず期待値のズレを疑う。
+- テストの期待値（文字起こし結果の文字列・タイムスタンプ）は whisper.cpp のバージョンと
+  `WhisperTranscriptionParams` の既定値（`beamSize = 2` など）に依存する。
+  whisper.cpp 更新時にこれらが落ちたら、まず期待値のズレを疑う。
 
 ### JNI / C++
+
+Java と C++ は次の 3 種類の文字列で結びついている。**どれも IDE のリネームでは追跡されない。**
+
+| 結びつき | Java 側 | C++ 側（`jp_clip_whisperjni_WhisperJNI.cpp`） | 不一致時の症状 |
+|---|---|---|---|
+| シンボル名 | `native` 宣言 | `Java_jp_clip_whisperjni_WhisperJNI_<method>` | `UnsatisfiedLinkError` |
+| クラス名 | `WhisperToken` `WhisperGrammar` `WhisperTranscriptionParams$VadParams` | `FindClass("jp/clip/whisperjni/...")`、`GetFieldID` の型シグネチャ | `NoClassDefFoundError` / `NoSuchFieldError` |
+| フィールド名 | `WhisperTranscriptionParams` `WhisperContextParams` `NativeHandle.nativeId` の各フィールド | `readTranscriptionParams` / `readContextParams` / `applyGrammar` 内の `"threads"` 等 | `NoSuchFieldError`（クラッシュはしない） |
 
 Java のパッケージ名を変えるときは、次の **4 箇所を必ず同時に**変える。
 
 1. `package` 宣言とディレクトリ
 2. `gradlew generateHeaders` でヘッダを再生成（`src/main/native/jni/` に出力される）
 3. `.cpp` の `Java_<package>_*` シンボル名すべて
-4. **`.cpp` 内の文字列リテラル** `FindClass("jp/clip/whisperjni/TokenData")`
+4. **`.cpp` 内の文字列リテラル** `"jp/clip/whisperjni/..."`（`FindClass` と `GetFieldID` の型シグネチャ）
 
-**4 が最重要。** IDE のリネーム機能では検出されない文字列リテラルなので、
-忘れるとビルドは通るのに `getTokens()` を呼んだ瞬間に落ちる。
+`WhisperTranscriptionParams` のフィールド名を変えるときは `.cpp` の `readTranscriptionParams` も変える。
+native メソッドを増減したときは 2 を実行し、`.cpp` に実装を足して、下のシンボル突き合わせを行う。
 
 変更後は必ずシンボルの突き合わせで検証する。
 
@@ -56,7 +120,9 @@ Java のパッケージ名を変えるときは、次の **4 箇所を必ず同�
 dumpbin /exports .\whisperjni-build\whisper-jni.dll | Select-String "Java_"
 ```
 
-Java 側の native メソッド宣言の数と一致すること（現在 27 個）。
+Java 側の native メソッド宣言の数と一致すること（現在 **24 個**）。
+
+C++ 側の設計方針は `.cpp` 冒頭のコメントに書いてある（ハンドル表、例外の出し方、UTF-8 の扱い）。
 
 ### シェル / PowerShell スクリプト
 
@@ -76,7 +142,9 @@ Java 側の native メソッド宣言の数と一致すること（現在 27 個
 ```
 whisper-jni-custom/
 ├── scripts/                      ビルド・モデル取得スクリプト
+├── lombok.config                 Lombok 設定
 ├── src/main/java/jp/clip/
+│   ├── whisper/                  高水準 API（WhisperEngine / WhisperConfig / …）
 │   └── whisperjni/               低レイヤ JNI bridge
 ├── src/main/native/
 │   ├── jni/                      自作 JNI 実装 (.cpp / .h)
@@ -88,6 +156,8 @@ whisper-jni-custom/
 └── WINDOWS-BUILD-1.9.3.md        作業記録とロードマップ
 ```
 
+- 2 層構成。利用側は原則 `jp.clip.whisper` だけを使う。`jp.clip.whisper` → `jp.clip.whisperjni` の
+  依存は一方向で、逆方向の import は禁止。
 - Maven 座標: `jp.clip:whisper-jni-custom:<version>`
 - バージョン規約: `<whisper.cpp のバージョン>-<このラッパーのビルド番号>`（例 `1.9.3-1`）
 - `settings.gradle` で `rootProject.name` を固定している。**消さないこと。**

@@ -1,34 +1,36 @@
 package jp.clip.whisperjni;
 
 /**
- * The {@link WhisperState} represents a whisper_state, useful for thread safe context sharing.
+ * whisper.cpp の {@code whisper_state} を指すハンドル。
  *
- * You need to dispose the native memory for its instances by calling {@link #close} or {@link WhisperJNI#free(WhisperState)}
+ * <p>
+ * 1 つのコンテキスト（= 1 つのモデル）を複数スレッドで共有したい場合に、スレッドごとに
+ * state を用意します。ネイティブメモリを保持しているため、使い終わったら必ず
+ * {@link #close()} を呼んでください（try-with-resources 推奨）。
+ * </p>
+ *
+ * <p>
+ * 解放時に呼ばれる whisper.cpp 関数は {@code whisper_free_state}。
+ * </p>
  *
  * @author Miguel Alvarez Díez - Initial contribution
  */
-public class WhisperState extends WhisperJNI.WhisperJNIPointer {
-	
-	private final WhisperContext context;
-	private final WhisperJNI whisper;
-	
+public final class WhisperState extends NativeHandle
+{
 	/**
-	 * The internal constructor for {@link WhisperState}
+	 * 内部用コンストラクタ。{@link WhisperJNI#createState(WhisperContext)} から生成されます。
 	 *
-	 * @param whisper whisper lib instance
-	 * @param ref     native pointer reference identifier
-	 * @param context parent {@link WhisperContext}
+	 * @param whisper 生成元のライブラリインスタンス
+	 * @param nativeId ネイティブ側が採番した ID
 	 */
-	protected WhisperState(WhisperJNI whisper, int ref, WhisperContext context)
+	WhisperState(WhisperJNI whisper, int nativeId)
 	{
-		super(ref);
-		this.whisper = whisper;
-		this.context = context;
+		super(whisper, nativeId);
 	}
-	
+
 	@Override
-	public void close()
+	protected void releaseNative()
 	{
-		whisper.free(this);
+		this.whisper.freeState(this.nativeId);
 	}
 }

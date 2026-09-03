@@ -1,20 +1,20 @@
 package jp.clip.whisperjni;
 
-import static jp.clip.whisperjni.WhisperGrammar.assertValidGrammar;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
+import java.io.BufferedInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.ShortBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.text.ParseException;
+import java.util.stream.IntStream;
 
 import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
@@ -34,10 +34,6 @@ public class WhisperJNITest {
 	
 	private static Path testModelPath = Path.of("ggml-tiny.bin");
 	private static Path samplePath = Path.of("src/main/native/whisper/samples/jfk.wav");
-	// private static Path sample2Path = Path.of("src/test/resources/progress.wav");
-	private static Path sampleAssistantGrammar = Path.of("src/main/native/whisper/grammars/assistant.gbnf");
-	private static Path sampleChessGrammar = Path.of("src/main/native/whisper/grammars/chess.gbnf");
-	private static Path sampleColorsGrammar = Path.of("src/main/native/whisper/grammars/colors.gbnf");
 	private static WhisperJNI whisper;
 	
 	private static Logger logger = LoggerFactory.getLogger(WhisperJNITest.class);
@@ -47,58 +43,45 @@ public class WhisperJNITest {
 	@BeforeAll
 	public static void beforeAll() throws IOException
 	{
-		File modelFile = testModelPath.toFile();
-		File sampleFile = samplePath.toFile();
-		
-		if(!modelFile.exists() || !modelFile.isFile())
+		if(!Files.isRegularFile(testModelPath))
 		{
-			throw new RuntimeException("Missing model file: " + testModelPath.toAbsolutePath());
+			throw new IllegalStateException("Missing model file: " + testModelPath.toAbsolutePath());
 		}
-		if(!sampleFile.exists() || !sampleFile.isFile())
+		if(!Files.isRegularFile(samplePath))
 		{
-			throw new RuntimeException("Missing sample file");
+			throw new IllegalStateException("Missing sample file: " + samplePath.toAbsolutePath());
 		}
 		
-		// Test extracting the VAD model
+		// 同梱 VAD モデルの取り出しもここで検証する
 		tempVAD = Files.createTempFile("tempVAD", ".bin");
-		LibraryUtils.exportVADModel(logger, tempVAD);
+		BundledResources.exportVadModel(logger, tempVAD);
 		
-		// Initialize before loading natives
 		whisper = new WhisperJNI();
 		
-		// Check if we have Vulkan natives
-		Path whisperJNIBuild = Path.of("whisperjni-build"); // for CI/CD
-		
-		// For CI/CD purposes, if you can use Vulkan, then you best believe the natives better be built for Vulkan too
+		// ビルドスクリプトの出力があればそこから読む（CI/CD やローカル開発）。無ければ jar 同梱を使う
+		Path whisperJNIBuild = Path.of("whisperjni-build");
 		if(Files.isDirectory(whisperJNIBuild))
 		{
 			logger.info("Loading from build dir");
-			
-			if(LibraryUtils.findAndLoadVulkanRuntime())
+			if(NativeLibraryLoader.loadVulkanRuntimeIfPresent())
 			{
-				logger.info("Found the Vulkan runtime! Loading the Vulkan natives");
-				LibraryUtils.loadLibrary(logger, whisperJNIBuild);
+				logger.info("Found the Vulkan runtime");
 			}
-			else
-			{
-				logger.info("Loading standard natives");
-				LibraryUtils.loadLibrary(logger, whisperJNIBuild);
-			}
+			NativeLibraryLoader.load(logger, whisperJNIBuild);
 		}
 		else
 		{
-			logger.info("Build dir not found, assuming natives are in the correct location");
-			whisper.loadLibrary(logger);
+			logger.info("Build dir not found, loading the bundled natives");
+			WhisperJNI.loadBundledLibraries(logger);
 		}
 		
-		// Set cpp side logger
 		WhisperJNI.setLogger(logger);
 	}
 	
 	@Test
 	public void testInit() throws IOException
 	{
-		WhisperContext ctx = whisper.init(testModelPath);
+		WhisperContext ctx = whisper.createContext(testModelPath);
 		assertNotNull(ctx);
 		ctx.close();
 	}
@@ -106,10 +89,10 @@ public class WhisperJNITest {
     @Test
 	public void testInitFromInputStream() throws IOException
 	{
-		WhisperContext ctxState = whisper.init(Files.newInputStream(testModelPath));
+		WhisperContext ctxState = whisper.createContext(Files.newInputStream(testModelPath));
 		assertNotNull(ctxState);
 		ctxState.close();
-        WhisperContext ctxNoState = whisper.init(Files.newInputStream(testModelPath), null, false);
+        WhisperContext ctxNoState = whisper.createContext(Files.newInputStream(testModelPath), null, false);
 		assertNotNull(ctxNoState);
 		ctxNoState.close();
 	}
@@ -117,7 +100,7 @@ public class WhisperJNITest {
 	@Test
 	public void testInitNoState() throws IOException
 	{
-		WhisperContext ctx = whisper.initNoState(testModelPath);
+		WhisperContext ctx = whisper.createContextWithoutState(testModelPath);
 		assertNotNull(ctx);
 		ctx.close();
 	}
@@ -125,7 +108,7 @@ public class WhisperJNITest {
 	@Test
 	public void testContextIsMultilingual() throws IOException
 	{
-		WhisperContext ctx = whisper.initNoState(testModelPath);
+		WhisperContext ctx = whisper.createContextWithoutState(testModelPath);
 		assertNotNull(ctx);
 		assertTrue(whisper.isMultilingual(ctx));
 		ctx.close();
@@ -134,10 +117,10 @@ public class WhisperJNITest {
 	@Test
 	public void testNewState() throws IOException
 	{
-		try(WhisperContext ctx = whisper.initNoState(testModelPath))
+		try(WhisperContext ctx = whisper.createContextWithoutState(testModelPath))
 		{
 			assertNotNull(ctx);
-			WhisperState state = whisper.initState(ctx);
+			WhisperState state = whisper.createState(ctx);
 			assertNotNull(state);
 			state.close();
 		}
@@ -146,56 +129,77 @@ public class WhisperJNITest {
 	@Test
 	public void testSegmentIndexException() throws IOException
 	{
-		WhisperContext ctx = whisper.init(testModelPath);
-		Exception exception = assertThrows(IndexOutOfBoundsException.class, () ->
+		try(WhisperContext ctx = whisper.createContext(testModelPath))
 		{
-			whisper.fullGetSegmentText(ctx, 1);
-		});
-		ctx.close();
-		assertEquals("Index out of range", exception.getMessage());
+			Exception exception = assertThrows(IndexOutOfBoundsException.class, () -> whisper.segmentText(ctx, 1));
+			assertEquals("Index out of range", exception.getMessage());
+			// 負の添字も範囲外として扱う
+			assertThrows(IndexOutOfBoundsException.class, () -> whisper.segmentStartCentiseconds(ctx, -1));
+			assertThrows(IndexOutOfBoundsException.class, () -> whisper.segmentTokens(ctx, 0));
+		}
 	}
 	
 	@Test
 	public void testPointerUnavailableException() throws UnsupportedAudioFileException, IOException
 	{
-		WhisperContext ctx = whisper.init(testModelPath);
+		WhisperContext ctx = whisper.createContext(testModelPath);
 		float[] samples = readFileSamples(samplePath);
-		WhisperFullParams params = new WhisperFullParams();
+		WhisperTranscriptionParams params = new WhisperTranscriptionParams();
 		ctx.close();
-		Exception exception = assertThrows(RuntimeException.class, () ->
-		{
-			whisper.full(ctx, params, samples, samples.length);
-		});
+		assertTrue(ctx.isReleased());
+		Exception exception = assertThrows(IllegalStateException.class, () -> whisper.transcribe(ctx, params, samples, samples.length));
 		assertEquals("Unavailable pointer, object is closed", exception.getMessage());
+		// close は何度呼んでも安全
+		ctx.close();
+	}
+	
+	@Test
+	public void testNumSamplesLargerThanArrayIsRejected() throws Exception
+	{
+		try(WhisperContext ctx = whisper.createContext(testModelPath))
+		{
+			float[] samples = new float[16000];
+			WhisperTranscriptionParams params = new WhisperTranscriptionParams();
+			assertThrows(IllegalArgumentException.class, () -> whisper.transcribe(ctx, params, samples, samples.length + 1));
+		}
+	}
+	
+	@Test
+	public void testInvalidGrammarIsRejected()
+	{
+		// grammar_parser::parse は失敗しても例外を投げず空の結果を返すので、ブリッジ側で検出して IOException にする
+		assertThrows(IOException.class, () -> whisper.parseGrammar("this is not ::= a valid ((( grammar"));
+		assertThrows(IOException.class, () -> whisper.parseGrammar("   "));
+		assertThrows(IOException.class, () -> whisper.parseGrammar("greeting ::= \"hi\""));
 	}
 	
 	@Test
 	public void testTokens() throws Exception
 	{
 		float[] samples = readFileSamples(samplePath);
-		try(WhisperContext ctx = whisper.init(testModelPath))
+		try(WhisperContext ctx = whisper.createContext(testModelPath))
 		{
 			assertNotNull(ctx);
-			WhisperFullParams params = new WhisperFullParams(WhisperSamplingStrategy.BEAM_SEARCH);
+			WhisperTranscriptionParams params = new WhisperTranscriptionParams(WhisperSamplingStrategy.BEAM_SEARCH);
 			params.printTimestamps = false;
-			int result = whisper.full(ctx, params, samples, samples.length);
+			int result = whisper.transcribe(ctx, params, samples, samples.length);
 			if(result != 0)
 			{
 				throw new RuntimeException("Transcription failed with code " + result);
 			}
-			int numSegments = whisper.fullNSegments(ctx);
+			int numSegments = whisper.segmentCount(ctx);
 			assertEquals(1, numSegments);
-			String text = whisper.fullGetSegmentText(ctx, 0);
+			String text = whisper.segmentText(ctx, 0);
 			assertEquals(" And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country.", text);
 			
 			// Grab tokens from each segment
 			for(int i = 0; i < numSegments; i++)
 			{
-				TokenData[] tokens = whisper.getTokens(ctx, i);
+				WhisperToken[] tokens = whisper.segmentTokens(ctx, i);
 				
-				for(TokenData token : tokens)
+				for(WhisperToken token : tokens)
 				{
-					logger.info("TOKEN: '{}'", token.token);
+					logger.info("TOKEN: '{}'", token.text);
 				}
 
 				assertTrue(tokens.length <= 26);
@@ -207,33 +211,33 @@ public class WhisperJNITest {
 	public void testTokensWithState() throws Exception
 	{
 		float[] samples = readFileSamples(samplePath);
-		try(WhisperContext ctx = whisper.initNoState(testModelPath))
+		try(WhisperContext ctx = whisper.createContextWithoutState(testModelPath))
 		{
 			assertNotNull(ctx);
-			WhisperFullParams params = new WhisperFullParams(WhisperSamplingStrategy.GREEDY);
+			WhisperTranscriptionParams params = new WhisperTranscriptionParams(WhisperSamplingStrategy.GREEDY);
 			params.noTimestamps = true;
 			params.printProgress = false;
 			params.printRealtime = false;
 			params.printSpecial = false;
-			try(WhisperState state = whisper.initState(ctx))
+			try(WhisperState state = whisper.createState(ctx))
 			{
 				assertNotNull(state);
-				int result = whisper.fullWithState(ctx, state, params, samples, samples.length);
+				int result = whisper.transcribeWithState(ctx, state, params, samples, samples.length);
 				if(result != 0)
 				{
 					throw new RuntimeException("Transcription failed with code " + result);
 				}
-				int numSegments = whisper.fullNSegmentsFromState(state);
+				int numSegments = whisper.segmentCountFromState(state);
 				assertEquals(1, numSegments);
 				
 				// Grab tokens from each segment
 				for(int i = 0; i < numSegments; i++)
 				{
-					TokenData[] tokens = whisper.getTokensFromState(ctx, state, i);
+					WhisperToken[] tokens = whisper.segmentTokensFromState(ctx, state, i);
 					
-					for(TokenData token : tokens)
+					for(WhisperToken token : tokens)
 					{
-						logger.info("TOKEN: '{}'", token.token);
+						logger.info("TOKEN: '{}'", token.text);
 					}
 					
 					assertTrue(tokens.length >= 23);
@@ -245,36 +249,29 @@ public class WhisperJNITest {
 	@Test
 	public void testVADFull() throws Exception
 	{
-		try(WhisperContext ctx = whisper.init(testModelPath))
+		try(WhisperContext ctx = whisper.createContext(testModelPath))
 		{
 			assertNotNull(ctx);
-			WhisperFullParams params = new WhisperFullParams(WhisperSamplingStrategy.GREEDY);
-			params.vad = true;
-			params.vad_model_path = tempVAD.toAbsolutePath().toString();
-			
-			WhisperFullParams.VADParams vadParams = params.vadParams;
-			vadParams.threshold = 0.995f;
-			// vadParams.min_speech_duration_ms = 200;
-			// vadParams.min_silence_duration_ms = 100;
-			// vadParams.max_speech_duration_s = 10.0f;
-			// vadParams.speech_pad_ms = 30;
-			// vadParams.samples_overlap = 0.1f;
+			WhisperTranscriptionParams params = new WhisperTranscriptionParams(WhisperSamplingStrategy.GREEDY);
+			params.vadEnabled = true;
+			params.vadModelPath = tempVAD.toAbsolutePath().toString();
+			params.vadParams.threshold = 0.995f;
 			
 			float[] samples = readFileSamples(samplePath);
-			int result = whisper.full(ctx, params, samples, samples.length);
+			int result = whisper.transcribe(ctx, params, samples, samples.length);
 			
 			if(result != 0)
 			{
 				throw new RuntimeException("Transcription failed with code " + result);
 			}
 			
-			final int segments = whisper.fullNSegments(ctx);
+			final int segments = whisper.segmentCount(ctx);
 			
 			logger.info("{} total segments after VAD filtering", segments);
 			
 			for(int i = 0; i < segments; i++)
 			{
-				String text = whisper.fullGetSegmentText(ctx, i);
+				String text = whisper.segmentText(ctx, i);
 				logger.info("VAD #{}: {}", i + 1, text);
 				// It should be pretty short (America)
 				assertTrue(text.length() < 256);
@@ -282,83 +279,24 @@ public class WhisperJNITest {
 		}
 	}
 	
-	// It seems, weirdly, that state doesn't work with VAD?? Check out the whisper.cpp file to see for yourself
-	
-	@Test
-	public void testVADState() throws Exception
-	{
-		float[] samples = readFileSamples(samplePath);
-		
-		try(WhisperContext ctx = whisper.initNoState(testModelPath); WhisperState state = whisper.initState(ctx))
-		{
-			assertNotNull(ctx);
-			assertNotNull(state);
-			
-			WhisperFullParams params = new WhisperFullParams(WhisperSamplingStrategy.GREEDY);
-			params.vad = true;
-			params.vad_model_path = tempVAD.toAbsolutePath().toString();
-			
-			// Keep default
-			WhisperFullParams.VADParams vadParams = params.vadParams;
-			vadParams.threshold = 0.995f;
-			// vadParams.min_speech_duration_ms = 200;
-			// vadParams.min_silence_duration_ms = 100;
-			// vadParams.max_speech_duration_s = 10.0f;
-			// vadParams.speech_pad_ms = 30;
-			// vadParams.samples_overlap = 0.1f;
-			
-			String result = whisper.vadState(ctx, state, params, new WhisperVADContextParams(), samples, samples.length);
-			logger.info("VAD result: {}", result);
-		}
-	}
-	
-	@Test
-	public void testBlankVADState() throws Exception
-	{
-		float[] samples = new float[(int) Math.pow(2, 16)];
-		
-		try(WhisperContext ctx = whisper.initNoState(testModelPath); WhisperState state = whisper.initState(ctx))
-		{
-			assertNotNull(ctx);
-			assertNotNull(state);
-			
-			WhisperFullParams params = new WhisperFullParams(WhisperSamplingStrategy.GREEDY);
-			params.vad = true;
-			params.vad_model_path = tempVAD.toAbsolutePath().toString();
-			
-			// Keep default
-			WhisperFullParams.VADParams vadParams = params.vadParams;
-			vadParams.threshold = 0.995f;
-			// vadParams.min_speech_duration_ms = 200;
-			// vadParams.min_silence_duration_ms = 100;
-			// vadParams.max_speech_duration_s = 10.0f;
-			// vadParams.speech_pad_ms = 30;
-			// vadParams.samples_overlap = 0.1f;
-			
-			String result = whisper.vadState(ctx, state, params, new WhisperVADContextParams(), samples, samples.length);
-			logger.info("Result: {}", result);
-			assert result == null;
-		}
-	}
-	
 	@Test
 	public void testFull() throws Exception
 	{
 		float[] samples = readFileSamples(samplePath);
-		try(WhisperContext ctx = whisper.init(testModelPath))
+		try(WhisperContext ctx = whisper.createContext(testModelPath))
 		{
 			assertNotNull(ctx);
-			WhisperFullParams params = new WhisperFullParams(WhisperSamplingStrategy.GREEDY);
-			int result = whisper.full(ctx, params, samples, samples.length);
+			WhisperTranscriptionParams params = new WhisperTranscriptionParams(WhisperSamplingStrategy.GREEDY);
+			int result = whisper.transcribe(ctx, params, samples, samples.length);
 			if(result != 0)
 			{
 				throw new RuntimeException("Transcription failed with code " + result);
 			}
-			int numSegments = whisper.fullNSegments(ctx);
+			int numSegments = whisper.segmentCount(ctx);
 			assertEquals(1, numSegments);
-			long startTime = whisper.fullGetSegmentTimestamp0(ctx, 0);
-			long endTime = whisper.fullGetSegmentTimestamp1(ctx, 0);
-			String text = whisper.fullGetSegmentText(ctx, 0);
+			long startTime = whisper.segmentStartCentiseconds(ctx, 0);
+			long endTime = whisper.segmentEndCentiseconds(ctx, 0);
+			String text = whisper.segmentText(ctx, 0);
 			assertEquals(0, startTime);
 			assertEquals(1050, endTime);
 			assertEquals(" And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.", text);
@@ -369,19 +307,19 @@ public class WhisperJNITest {
 	public void testFullBeamSearch() throws Exception
 	{
 		float[] samples = readFileSamples(samplePath);
-		try(WhisperContext ctx = whisper.init(testModelPath))
+		try(WhisperContext ctx = whisper.createContext(testModelPath))
 		{
 			assertNotNull(ctx);
-			WhisperFullParams params = new WhisperFullParams(WhisperSamplingStrategy.BEAM_SEARCH);
+			WhisperTranscriptionParams params = new WhisperTranscriptionParams(WhisperSamplingStrategy.BEAM_SEARCH);
 			params.printTimestamps = false;
-			int result = whisper.full(ctx, params, samples, samples.length);
+			int result = whisper.transcribe(ctx, params, samples, samples.length);
 			if(result != 0)
 			{
 				throw new RuntimeException("Transcription failed with code " + result);
 			}
-			int numSegments = whisper.fullNSegments(ctx);
+			int numSegments = whisper.segmentCount(ctx);
 			assertEquals(1, numSegments);
-			String text = whisper.fullGetSegmentText(ctx, 0);
+			String text = whisper.segmentText(ctx, 0);
 			assertEquals(" And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country.", text);
 		}
 	}
@@ -390,23 +328,23 @@ public class WhisperJNITest {
 	public void testFullWithState() throws Exception
 	{
 		float[] samples = readFileSamples(samplePath);
-		try(WhisperContext ctx = whisper.initNoState(testModelPath))
+		try(WhisperContext ctx = whisper.createContextWithoutState(testModelPath))
 		{
 			assertNotNull(ctx);
-			WhisperFullParams params = new WhisperFullParams(WhisperSamplingStrategy.GREEDY);
-			try(WhisperState state = whisper.initState(ctx))
+			WhisperTranscriptionParams params = new WhisperTranscriptionParams(WhisperSamplingStrategy.GREEDY);
+			try(WhisperState state = whisper.createState(ctx))
 			{
 				assertNotNull(state);
-				int result = whisper.fullWithState(ctx, state, params, samples, samples.length);
+				int result = whisper.transcribeWithState(ctx, state, params, samples, samples.length);
 				if(result != 0)
 				{
 					throw new RuntimeException("Transcription failed with code " + result);
 				}
-				int numSegments = whisper.fullNSegmentsFromState(state);
+				int numSegments = whisper.segmentCountFromState(state);
 				assertEquals(1, numSegments);
-				long startTime = whisper.fullGetSegmentTimestamp0FromState(state, 0);
-				long endTime = whisper.fullGetSegmentTimestamp1FromState(state, 0);
-				String text = whisper.fullGetSegmentTextFromState(state, 0);
+				long startTime = whisper.segmentStartCentisecondsFromState(state, 0);
+				long endTime = whisper.segmentEndCentisecondsFromState(state, 0);
+				String text = whisper.segmentTextFromState(state, 0);
 				assertEquals(0, startTime);
 				assertEquals(1050, endTime);
 				assertEquals(" And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.", text);
@@ -418,22 +356,22 @@ public class WhisperJNITest {
 	public void testFullWithStateBeamSearch() throws Exception
 	{
 		float[] samples = readFileSamples(samplePath);
-		try(WhisperContext ctx = whisper.initNoState(testModelPath))
+		try(WhisperContext ctx = whisper.createContextWithoutState(testModelPath))
 		{
 			assertNotNull(ctx);
-			WhisperFullParams params = new WhisperFullParams(WhisperSamplingStrategy.BEAM_SEARCH);
+			WhisperTranscriptionParams params = new WhisperTranscriptionParams(WhisperSamplingStrategy.BEAM_SEARCH);
 			params.printTimestamps = false;
-			try(WhisperState state = whisper.initState(ctx))
+			try(WhisperState state = whisper.createState(ctx))
 			{
 				assertNotNull(state);
-				int result = whisper.fullWithState(ctx, state, params, samples, samples.length);
+				int result = whisper.transcribeWithState(ctx, state, params, samples, samples.length);
 				if(result != 0)
 				{
 					throw new RuntimeException("Transcription failed with code " + result);
 				}
-				int numSegments = whisper.fullNSegmentsFromState(state);
+				int numSegments = whisper.segmentCountFromState(state);
 				assertEquals(1, numSegments);
-				String text = whisper.fullGetSegmentTextFromState(state, 0);
+				String text = whisper.segmentTextFromState(state, 0);
 				assertEquals(" And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country.", text);
 			}
 		}
@@ -448,19 +386,19 @@ public class WhisperJNITest {
 		try(WhisperGrammar grammar = whisper.parseGrammar(grammarText))
 		{
 			assertNotNull(grammar);
-			try(WhisperContext ctx = whisper.init(testModelPath))
+			try(WhisperContext ctx = whisper.createContext(testModelPath))
 			{
 				assertNotNull(ctx);
-				WhisperFullParams params = new WhisperFullParams(WhisperSamplingStrategy.GREEDY);
+				WhisperTranscriptionParams params = new WhisperTranscriptionParams(WhisperSamplingStrategy.GREEDY);
 				params.grammar = grammar;
-				int result = whisper.full(ctx, params, samples, samples.length);
+				int result = whisper.transcribe(ctx, params, samples, samples.length);
 				if(result != 0)
 				{
 					throw new RuntimeException("Transcription failed with code " + result);
 				}
-				int numSegments = whisper.fullNSegments(ctx);
+				int numSegments = whisper.segmentCount(ctx);
 				assertEquals(1, numSegments);
-				String text = whisper.fullGetSegmentText(ctx, 0);
+				String text = whisper.segmentText(ctx, 0);
 				assertEquals(" And so, my fellow American, ask not what your country can do for you, ask what you can do for your country.", text);
 			}
 		}
@@ -477,43 +415,28 @@ public class WhisperJNITest {
 	@Test
 	public void initOpenVINO() throws Exception
 	{
-		try(WhisperContext ctx = whisper.initNoState(testModelPath))
+		try(WhisperContext ctx = whisper.createContextWithoutState(testModelPath))
 		{
 			assertNotNull(ctx);
-			whisper.initOpenVINO(ctx, "CPU");
+			whisper.initOpenVinoEncoder(ctx, "CPU");
 		}
 	}
 	
-	@Test
-	public void validateGrammar() throws ParseException, IOException
+	/**
+	 * jfk.wav（16kHz / 16bit / モノラル / リトルエンディアン）を -1.0〜1.0 の float 列として読む。
+	 * ブリッジ層のテストなので、上位層の AudioFileReader には依存させない。
+	 */
+	private static float[] readFileSamples(Path samplePath) throws UnsupportedAudioFileException, IOException
 	{
-		assertValidGrammar(sampleAssistantGrammar);
-		assertValidGrammar(sampleColorsGrammar);
-		assertValidGrammar(sampleChessGrammar);
-	}
-	
-	private float[] readFileSamples(Path samplePath) throws UnsupportedAudioFileException, IOException
-	{
-		// sample is a 16 bit int 16000hz little endian wav file
-		AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(samplePath.toFile());
-		// read all the available data to a little endian capture buffer
-		ByteBuffer captureBuffer = ByteBuffer.allocate(audioInputStream.available());
-		captureBuffer.order(ByteOrder.LITTLE_ENDIAN);
-		int read = audioInputStream.read(captureBuffer.array());
-		if(read == -1)
+		try(InputStream file = new BufferedInputStream(Files.newInputStream(samplePath));
+				AudioInputStream audio = AudioSystem.getAudioInputStream(file))
 		{
-			throw new IOException("Empty file");
+			ShortBuffer pcm = ByteBuffer.wrap(audio.readAllBytes()).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer();
+			float[] samples = new float[pcm.remaining()];
+			IntStream.range(0, samples.length)
+					.forEach(i -> samples[i] = Math.max(-1.0f, Math.min((float) pcm.get(i) / (float) Short.MAX_VALUE, 1.0f)));
+			return samples;
 		}
-		// obtain the 16 int audio samples, short type in java
-		ShortBuffer shortBuffer = captureBuffer.asShortBuffer();
-		// transform the samples to f32 samples
-		float[] samples = new float[captureBuffer.capacity() / 2];
-		int i = 0;
-		while(shortBuffer.hasRemaining())
-		{
-			samples[i++] = Float.max(-1f, Float.min(((float) shortBuffer.get()) / (float) Short.MAX_VALUE, 1f));
-		}
-		return samples;
 	}
 	
 }

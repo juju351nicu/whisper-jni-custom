@@ -1,31 +1,36 @@
 package jp.clip.whisperjni;
 
 /**
- * The {@link WhisperContext} class represents a native whisper.cpp context.
+ * whisper.cpp の {@code whisper_context} を指すハンドル。読み込んだモデルを保持します。
  *
- * You need to dispose the native memory for its instances by calling {@link #close} or {@link WhisperJNI#free(WhisperJNI.WhisperJNIPointer)}
+ * <p>
+ * ネイティブメモリを保持しているため、使い終わったら必ず {@link #close()} を呼んでください
+ * （try-with-resources 推奨）。閉じたあとにこのインスタンスを使うと
+ * {@link IllegalStateException} になります。
+ * </p>
+ *
+ * <p>
+ * 解放時に呼ばれる whisper.cpp 関数は {@code whisper_free}。
+ * </p>
  *
  * @author Miguel Alvarez Díez - Initial contribution
  */
-public class WhisperContext extends WhisperJNI.WhisperJNIPointer {
-	
-	private final WhisperJNI whisper;
-	
+public final class WhisperContext extends NativeHandle
+{
 	/**
-	 * Internal context constructor
-	 * 
-	 * @param whisper library instance
-	 * @param ref     native pointer identifier
+	 * 内部用コンストラクタ。{@link WhisperJNI#createContext(java.nio.file.Path)} などから生成されます。
+	 *
+	 * @param whisper 生成元のライブラリインスタンス
+	 * @param nativeId ネイティブ側が採番した ID
 	 */
-	protected WhisperContext(WhisperJNI whisper, int ref)
+	WhisperContext(WhisperJNI whisper, int nativeId)
 	{
-		super(ref);
-		this.whisper = whisper;
+		super(whisper, nativeId);
 	}
-	
+
 	@Override
-	public void close()
+	protected void releaseNative()
 	{
-		whisper.free(this);
+		this.whisper.freeContext(this.nativeId);
 	}
 }

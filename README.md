@@ -16,10 +16,13 @@ A JNI wrapper for [whisper.cpp](https://github.com/ggerganov/whisper.cpp), allow
 > | Gradle | 9.7.1 (wrapper) |
 > | Produced bytecode | Java 17 - consumers still only need Java 17+ |
 >
-> The public Java API is unchanged from the 1.8.3-based `1.0.1` release.
+> The Java API was reorganised in `1.9.3-1` (see `WINDOWS-BUILD-1.9.3.md`): a new
+> high-level `jp.clip.whisper` package, and the JNI bridge moved to `jp.clip.whisperjni`
+> with camelCase field names. It is **not** source-compatible with the 1.8.3-based
+> `io.github.jaffe2718` releases.
 > Note that since whisper.cpp v1.9.3 the native build additionally produces a
 > `parakeet` shared library (a second ASR model family shipped inside whisper.cpp).
-> It is bundled with the natives and loaded by `LibraryUtils`, but no Java API is
+> It is bundled with the natives and loaded by `NativeLibraryLoader`, but no Java API is
 > exposed for it yet.
 
 ## Platform support
@@ -97,7 +100,7 @@ WhisperConfig config = WhisperConfig.builder()
         .model(Path.of("ggml-large-v3-turbo-q5_0.bin"))
         .language("ja")                                    // 既定は "en"
         .threads(Runtime.getRuntime().availableProcessors())
-        .vad(true)                                         // 無音区間を除去して高速化
+        .vadEnabled(true)                                  // 無音区間を除去して高速化
         .build();
 
 try (WhisperEngine engine = WhisperEngine.open(config))
@@ -143,41 +146,53 @@ try (WhisperEngine engine = WhisperEngine.open(config))
 
 whisper.cpp の関数に 1 対 1 で対応する薄い層です。上の高水準 API で足りない機能
 （state を分離した実行、トークン単位の情報など）が必要な場合に使います。
+| クラス | 役割 |
+|---|---|
+| `WhisperJNI` | native 宣言と、その薄いラッパー。各メソッドの Javadoc に対応する whisper.cpp 関数名を併記 |
+| `WhisperContext` / `WhisperState` / `WhisperGrammar` | ネイティブオブジェクトのハンドル（`NativeHandle` のサブクラス、`AutoCloseable`） |
+| `WhisperContextParams` / `WhisperTranscriptionParams` | C 構造体（`whisper_context_params` / `whisper_full_params`）を写した public フィールドの入れ物 |
+| `WhisperSamplingStrategy` | `GREEDY` / `BEAM_SEARCH`（whisper.cpp の enum に対応） |
+| `WhisperToken` | トークン単位の情報（`whisper_token_data` + テキスト） |
+| `NativeLibraryLoader` | ディレクトリ内のネイティブを依存順に `System.load` する。Vulkan ランタイムの検出も |
+| `BundledResources` | jar 同梱のネイティブ / VAD モデルをディスクへ取り出す |
+| `Platform` | OS / アーキテクチャの判定と `<os>-<arch>` ディレクトリ名 |
+| `GbnfGrammarValidator` | GBNF 文法の純 Java 事前検証 |
+
 ### Examples
 
 ```java
-var whisper = new WhisperJNI();
-whisper.loadLibrary(); // loads the built-in CPU natives
-float[] samples = readJFKFileSamples();
-var ctx = whisper.init(Path.of('ggml-tiny.bin'));
-var params = new WhisperFullParams();
-int result = whisper.full(ctx, params, samples, samples.length);
-if(result != 0) {
-    throw new RuntimeException("Transcription failed with code " + result);
+WhisperJNI.loadBundledLibraries(); // jar 同梱の CPU 版ネイティブを読み込む
+WhisperJNI whisper = new WhisperJNI();
+float[] samples = AudioFileReader.readSamples(Path.of("jfk.wav"));
+try(WhisperContext ctx = whisper.createContext(Path.of("ggml-tiny.bin")))
+{
+    WhisperTranscriptionParams params = new WhisperTranscriptionParams(WhisperSamplingStrategy.GREEDY);
+    int result = whisper.transcribe(ctx, params, samples, samples.length);
+    if(result != 0)
+    {
+        throw new IllegalStateException("Transcription failed with code " + result);
+    }
+    String text = whisper.segmentText(ctx, 0);
+    // " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country."
 }
-int numSegments = whisper.fullNSegments(ctx);
-assertEquals(1, numSegments);
-String text = whisper.fullGetSegmentText(ctx,0);
-assertEquals(" And so my fellow Americans ask not what your country can do for you ask what you can do for your country.", text);
-ctx.close(); // free native memory, should be called when we don't need the context anymore
 ```
 
 ### Using the Vulkan Natives
 
-You can find the Vulkan natives in [releases](https://github.com/jaffe2718/whisper-jni/releases). You'll need to download and load them using `LibraryUtils`:
+Vulkan 版のネイティブは `scripts/` のビルドスクリプトに `-DGGML_VULKAN=ON` を渡して自分でビルドします。
+読み込みは `NativeLibraryLoader` で行います:
 
 ```java
 Path vulkanNatives = Path.of("path", "to", "whisperjni-vulkan-natives");
-if(LibraryUtils.findAndLoadVulkanRuntime()) {
-    logger.info("Found the Vulkan runtime! Loading the Vulkan natives");
-    LibraryUtils.loadLibrary(logger, vulkanNatives);
-} else {
-    logger.info("Loading standard natives");
-    LibraryUtils.loadLibrary(logger, vulkanNatives);
+if(NativeLibraryLoader.loadVulkanRuntimeIfPresent())
+{
+    logger.info("Vulkan ランタイムを読み込みました");
 }
+NativeLibraryLoader.load(logger, vulkanNatives);
 ```
 
-If you depend on whisper-jni and need to extract the Vulkan natives from a folder within the JAR, `LibraryUtils` has helper methods for this to extract and load them to/from a temporary folder. If you need to know which natives to load based on the machine's OS / architecture, there's methods for that too. See the `LibraryUtils` Javadoc!
+jar の中にネイティブを同梱している場合は `BundledResources.extractDirectory(logger, Platform.current().nativeLibraryDirectoryName())`
+で一時ディレクトリへ取り出してから `NativeLibraryLoader.load` してください（`WhisperJNI.loadBundledLibraries()` がやっているのと同じ手順です）。
 
 ## Grammar
 
@@ -185,13 +200,12 @@ This wonderful functionality added in whisper.cpp v1.5.0 was integrated into the
 It makes use of the grammar parser implementation provided among the whisper.cpp examples,
 so you can use the [gbnf grammar](https://github.com/ggerganov/whisper.cpp/blob/master/grammars/) to improve the transcriptions results.
 ```java
-try (WhisperGrammar grammar = whisper.parseGrammar(Paths.of("/my_grammar.gbnf"))) {
-    var params = new WhisperFullParams();
+try(WhisperGrammar grammar = whisper.parseGrammar(Path.of("my_grammar.gbnf")))
+{
+    WhisperTranscriptionParams params = new WhisperTranscriptionParams();
     params.grammar = grammar;
     params.grammarPenalty = 100f;
-    ...
-    int result = whisper.full(ctx, params, samples, samples.length);
-    ...
+    int result = whisper.transcribe(ctx, params, samples, samples.length);
 }
 ```
 
@@ -206,6 +220,15 @@ Prerequisites: **JDK 25** (`JAVA_HOME` must point at it), CMake 3.21+, and a C/C
 > Although this shouldn't cause any problems, if your machine can use Vulkan, the test script will consider the natives in `/whisperjni-build` to be Vulkan natives for CI/CD reasons.
 > You can alternatively move the natives from `/whisperjni-build` to its respective subfolder in `src/main/resources` and delete the build directory.
 4. `./gradlew test`
+
+### Lombok
+
+`jp.clip.whisper.WhisperConfig` は [Lombok](https://projectlombok.org/)（`@Value` / `@Builder`）で
+ビルダーとアクセサを生成しています。Lombok はコンパイル時のみの依存で、生成された jar を使う側には
+一切影響しません（`compileOnly`）。Gradle ビルドは `io.freefair.lombok` プラグインが自動設定するので
+追加作業は不要ですが、**IDE でソースを開く場合は IDE 側の Lombok 対応が必要**です
+（IntelliJ IDEA: 同梱プラグインを有効化 / Eclipse・Spring Tools: `lombok.jar` のインストーラで
+`eclipse.ini` にエージェントを登録）。
 
 ## Extending the Native API
 
