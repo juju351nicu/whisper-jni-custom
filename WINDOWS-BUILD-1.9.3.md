@@ -724,41 +724,34 @@ Windows での検証手順は「Step 3-4 の Windows 手順」（本ファイル
 
 ---
 
-## Step 4 — ⑧ Javadoc の完全日本語化
+## Step 4 — ⑧ Javadoc の完全日本語化  ✅ 2026-09-03 クラウド検証完了・Windows で `gradlew javadoc` の確認待ち
 
-本家追従を捨てたので、全クラス・全メソッドを日本語化して構いません。
+Step 3-4 のリファクタリングで全クラスを書き直した時点で、Javadoc はすべて日本語になっています。
+残りは仕上げだけを行いました。
 
-### 4-1. Javadoc タスクの文字コード設定（これをやらないと文字化けします）
+| 項目 | 状態 |
+|---|---|
+| 文字コード設定 | `build.gradle` の `Javadoc` タスクに `encoding` / `docEncoding` / `charSet` = UTF-8 を設定済み（Step 3-4 で実施） |
+| 警告 | delombok 後のソースに対して `-Xdoclint:all,-missing` で**エラー 0・警告 0**。`missing` を外しているのは Lombok が生成するアクセサに `@return` が付かないため（`build.gradle` で同じ設定にしてある） |
+| パッケージ概要 | `package-info.java` を両パッケージに追加。`jp.clip.whisperjni` の方には Java クラスと whisper.cpp の構造体の対応表を入れた |
+| 書き分け | `jp.clip.whisper` は使用例付き、`jp.clip.whisperjni` は対応する whisper.cpp の関数名・構造体メンバー名を併記（`CLAUDE.md` にルール化） |
+| 英文の残り | `grep` で英文 Javadoc の残存を確認、0 件 |
 
-```groovy
-tasks.withType(Javadoc).configureEach {
-    options.encoding = 'UTF-8'
-    options.source = '17'
-    options.locale = 'ja_JP'
-    if (options instanceof StandardJavadocDocletOptions) {
-        options.charSet = 'UTF-8'
-        options.docEncoding = 'UTF-8'
-    }
-}
+`options.locale = 'ja_JP'` は設定していません。これは javadoc が生成する定型文（"Method Summary" など）を
+日本語化する設定で、あると便利ですが、JDK 25 の日本語リソースは翻訳の抜けがあり英日混在になることがあります。
+必要なら `build.gradle` に 1 行足すだけです。
+
+**Windows での確認**
+
+```powershell
+cd C:\pr-work\whisper-jni-custom
+.\gradlew.bat javadoc
+#   期待: BUILD SUCCESSFUL、警告 0（Lombok の Unsafe 警告が出ることはあるが javadoc とは無関係）
+Start-Process .\build\docs\javadoc\index.html     # ブラウザで日本語が正常に表示されること
+git add -A
+git commit -m "Step 4: package-info.java を追加し Javadoc の日本語化を完了"
+git push
 ```
-
-`encoding`（ソースの文字コード）だけでなく **`charSet` と `docEncoding`（出力HTMLの文字コード）**
-の3つを揃える必要があります。1つ欠けると生成された HTML で日本語が化けます。
-
-### 4-2. 現状の警告 21 件を潰す
-
-`javadocJar` 生成時に「no comment」警告が 21 件出ています（`WhisperVADContextParams` /
-`WhisperVADSegment` など）。日本語化のついでに全部埋めて、警告 0 を目指します。
-Maven Central 公開時に javadoc jar が必須なので、ここを綺麗にしておくと後が楽です。
-
-### 4-3. 書き分けの指針
-
-- `jp.clip.whisper`（自作 API 層）: 日本語で、使い方の例を `{@snippet}` か `<pre>` で入れる
-- `jp.clip.whisperjni`（JNI bridge 層）: 日本語で、**「対応する whisper.cpp の関数名」を必ず併記**する。
-  例: `whisper_full_with_state に対応`。将来 whisper.cpp を上げるとき、
-  この対応表がそのまま影響範囲の調査資料になります
-
-**完了条件**: `gradlew javadoc` が警告 0、生成 HTML をブラウザで開いて日本語が正常表示。
 
 ---
 
