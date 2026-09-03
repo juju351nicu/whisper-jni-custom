@@ -9,8 +9,8 @@ jobs:
             -   name: Download tiny ggml model
                 run: |
                     git submodule update --init
-                    ./download-test-model.sh
-                    ./download-vad-model.sh
+                    ./scripts/download-test-model.sh
+                    ./scripts/download-vad-model.sh
                     # Move models together for simpler download
                     mkdir models
                     mv ggml-tiny.bin models/
@@ -139,7 +139,7 @@ jobs:
             -   name: Build
                 env:
                     VULKAN: ${{ matrix.vulkan }}
-                run: ./build_linux.sh
+                run: ./scripts/build-linux.sh
 
             -   name: Test
                 run: ./gradlew test
@@ -188,7 +188,7 @@ jobs:
                 shell: powershell
                 env:
                     VULKAN: ${{ matrix.vulkan }}
-                run: .\build_windows.ps1
+                run: .\scripts\build-windows.ps1
             -   name: Test
                 run: ./gradlew test
             -   name: Publish test report
@@ -251,8 +251,8 @@ jobs:
                 run: |
                     export DYLD_LIBRARY_PATH=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/
                     # Just in case
-                    chmod +x ./build_mac.sh
-                    ./build_mac.sh ${{ matrix.arch }}
+                    chmod +x ./scripts/build-mac.sh
+                    ./scripts/build-mac.sh ${{ matrix.arch }}
                 # Apparently gradlew isn't executable by default
             -   name: Test
                 run: |
@@ -356,8 +356,8 @@ jobs:
             -   name: Build Linux CUDA
                 shell: bash
                 run: |
-                    chmod +x ./build_cuda.sh
-                    ./build_cuda.sh
+                    chmod +x ./scripts/build-cuda.sh
+                    ./scripts/build-cuda.sh
 
             -   name: Upload native library
                 uses: actions/upload-artifact@v4

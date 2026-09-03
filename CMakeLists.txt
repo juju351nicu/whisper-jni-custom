@@ -63,7 +63,7 @@ endif ()
 add_subdirectory(src/main/native/whisper)
 
 add_library(whisper-jni SHARED
-        src/main/native/jp_clip_whisperjni_WhisperJNI.cpp
+        src/main/native/jni/jp_clip_whisperjni_WhisperJNI.cpp
         # Needed
         src/main/native/whisper/examples/grammar-parser.cpp
 )
@@ -105,7 +105,7 @@ endif ()
 
 target_include_directories(whisper-jni PRIVATE
         ${JNI_INCLUDE_DIRS}
-        src/main/native
+        src/main/native/jni
         src/main/native/whisper/include
         # For grammar-parser.h. We include this in our cpp code
         src/main/native/whisper/examples

@@ -1,4 +1,8 @@
-﻿$env:MODEL_NAME = 'tiny'
+﻿# scripts\ 配下のスクリプトはプロジェクトルートからの相対パスを前提とするため、
+# どこから呼ばれてもルートへ移動する。
+Set-Location (Join-Path $PSScriptRoot "..")
+
+$env:MODEL_NAME = 'tiny'
 .\src\main\native\whisper\models\download-ggml-model.cmd $env:MODEL_NAME
 
 # whisper.cpp の download-ggml-model.cmd はカレントディレクトリに保存するため、

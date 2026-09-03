@@ -1,4 +1,8 @@
-﻿# whisper-jni ネイティブライブラリ (Windows / MSVC) ビルドスクリプト
+﻿# scripts\ 配下のスクリプトはプロジェクトルートからの相対パスを前提とするため、
+# どこから呼ばれてもルートへ移動する。
+Set-Location (Join-Path $PSScriptRoot "..")
+
+# whisper-jni ネイティブライブラリ (Windows / MSVC) ビルドスクリプト
 $ErrorActionPreference = 'Stop'
 
 $vulkanEnabled = if ($env:VULKAN) { $env:VULKAN } else { 'OFF' }

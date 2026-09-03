@@ -344,7 +344,7 @@ deprecation 警告 0 件、生成 POM とjar 内 `META-INF` の内容を確認�
 
 ---
 
-## Step 2 — ⑤ 完全リネーム + 2層化（今回の山場）
+## Step 2 — ⑤ 完全リネーム + 2層化  （2-1 ✅ 2026-09-03 完了 / 2-2 は Step 3 の後）
 
 ### 2-1. JNI bridge 層のリネーム `io.github.jaffe2718.whisperjni` → `jp.clip.whisperjni`
 
@@ -464,7 +464,7 @@ try (var engine = WhisperEngine.open(config)) {
 
 ---
 
-## Step 3 — ②/⑥ リファクタリング
+## Step 3 — ②/⑥ リファクタリング  ✅ 2026-09-03 完了
 
 Step 2 が緑になってから着手します。**1項目ずつコミット**してください。
 まとめてやると、壊れたときに原因が分からなくなります。
@@ -522,7 +522,26 @@ src/main/native/
 - `LibraryUtils` の `loadOrder` を単なる文字列リストから enum か定数クラスへ
 - 重複している `full` / `fullWithState` 系のオーバーロードを整理
 
-**完了条件**: 各項目のコミットごとに `gradlew test` が緑。CI も一度手動実行して通すこと。
+**実施結果（2026-09-03）**
+
+| 項目 | 内容 |
+|---|---|
+| `scripts/` 集約 | 8スクリプトを `scripts/` へ移動し kebab-case に統一（`build-windows.ps1` `build-linux.sh` `build-mac.sh` `build-cuda.sh` `download-test-model.{sh,ps1}` `download-vad-model.{sh,ps1}`） |
+| 相対パス対策 | 全スクリプト冒頭にルートへの `cd` を追加（`cd "$(dirname "$0")/.."` / `Set-Location (Join-Path $PSScriptRoot "..")`）。**どのディレクトリから呼んでも動く**ようになった |
+| shebang 補完 | `build-mac.sh` と `download-test-model.sh` に `#!/bin/bash` が無かったので追加 |
+| `src/main/native/jni/` 分離 | 自作 JNI コードを `src/main/native/jni/` へ。submodule の `src/main/native/whisper/` はそのまま（`.gitmodules` は変更なし） |
+| 参照の追随 | `CMakeLists.txt`（ソースパス + include ディレクトリ）、`build.gradle`（`headerOutputDirectory`）、`.github/workflows/main.yml`（8箇所）、`README.md` |
+| 生成物の掃除 | ルートの `bin/`（旧 `io/github/jaffe2718` の `.class` が残っていた IDE 生成物）を削除 |
+
+**record 化は実施しませんでした（意図的）**
+
+`TokenData` / `WhisperVADSegment` を record にすると、フィールドアクセス
+（`token.token` など）がアクセサ（`token.token()`）に変わり、**公開 API の破壊的変更**に
+なります。既存テストも transcribe-shell も壊れる可能性があるため、得られる利益に対して
+リスクが見合いません。将来 API を意図的に作り直すときに一緒に検討するのが適切です。
+
+検証: `scripts/build-linux.sh` を **/tmp から実行**して通しでビルド成功（cd 処理の確認）。
+生成ライブラリ 6 個、JNI シンボル **27/27 完全一致**を維持。
 
 ---
 

@@ -1,4 +1,9 @@
 #!/bin/bash
+
+# scripts/ 配下のスクリプトはプロジェクトルートからの相対パスを前提とするため、
+# どこから呼ばれてもルートへ移動する。
+cd "$(dirname "$0")/.." || exit 1
+
 set -xe
 
 # User env required:

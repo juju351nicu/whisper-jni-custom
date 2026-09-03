@@ -138,12 +138,12 @@ jreleaser {
 
 tasks.register('generateHeaders', JavaCompile) {
     group = 'whisper-jni'
-    description = 'Regenerates the JNI headers in src/main/native from the Java native declarations'
+    description = 'Regenerates the JNI headers in src/main/native/jni from the Java native declarations'
 
     source = fileTree('src/main/java')
     classpath = sourceSets.main.compileClasspath
     destinationDirectory.set(layout.buildDirectory.dir('generated/jni-headers'))
-    options.headerOutputDirectory.set(file('src/main/native'))
+    options.headerOutputDirectory.set(file('src/main/native/jni'))
 }
 
 // Custom tasks for ease of use

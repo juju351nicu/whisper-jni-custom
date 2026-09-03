@@ -1,4 +1,8 @@
-﻿$env:MODEL_NAME = 'silero-v6.2.0'
+﻿# scripts\ 配下のスクリプトはプロジェクトルートからの相対パスを前提とするため、
+# どこから呼ばれてもルートへ移動する。
+Set-Location (Join-Path $PSScriptRoot "..")
+
+$env:MODEL_NAME = 'silero-v6.2.0'
 .\src\main\native\whisper\models\download-vad-model.cmd $env:MODEL_NAME
 
 # whisper.cpp の download-vad-model.cmd はカレントディレクトリに保存するため、

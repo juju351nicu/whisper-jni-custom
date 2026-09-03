@@ -1,5 +1,9 @@
 #!/bin/sh
 
+# scripts/ 配下のスクリプトはプロジェクトルートからの相対パスを前提とするため、
+# どこから呼ばれてもルートへ移動する。
+cd "$(dirname "$0")/.." || exit 1
+
 # This script downloads Whisper VAD model files that have already been converted
 # to ggml format. This way you don't have to convert them yourself.
 

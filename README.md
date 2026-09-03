@@ -36,7 +36,7 @@ your local Maven repository:
 
 ```powershell
 # Windows
-.\build_windows.ps1
+.\scripts\build-windows.ps1
 New-Item -ItemType Directory -Force .\src\main\resources\windows-x64 | Out-Null
 Copy-Item .\whisperjni-build\*.dll .\src\main\resources\windows-x64\ -Force
 .\gradlew.bat publishToMavenLocal
@@ -138,8 +138,8 @@ Prerequisites: **JDK 25** (`JAVA_HOME` must point at it), CMake 3.21+, and a C/C
 (MSVC on Windows, clang on macOS, gcc on Linux). Gradle itself is provided by the wrapper.
 
 1. Submodule whisper.cpp by running `git submodule update --init`.
-2. Download the test models using the scripts `download-test-model` and `download-vad-model`. Then move `silero-v6.2.0.bin` to `src/main/resources`!
-3. Run the appropriate build script for your platform (`build_linux.sh`, `build_mac.sh` or `build_windows.ps1`). It will build the library to `/whisperjni-build`, which the JUnit test file will load from.
+2. Download the test models using the scripts `scripts/download-test-model` and `scripts/download-vad-model`. Then move `silero-v6.2.0.bin` to `src/main/resources`!
+3. Run the appropriate build script for your platform (`scripts/build-linux.sh`, `scripts/build-mac.sh` or `scripts/build-windows.ps1`). It will build the library to `/whisperjni-build`, which the JUnit test file will load from.
 > Although this shouldn't cause any problems, if your machine can use Vulkan, the test script will consider the natives in `/whisperjni-build` to be Vulkan natives for CI/CD reasons.
 > You can alternatively move the natives from `/whisperjni-build` to its respective subfolder in `src/main/resources` and delete the build directory.
 4. `./gradlew test`
@@ -149,6 +149,6 @@ Prerequisites: **JDK 25** (`JAVA_HOME` must point at it), CMake 3.21+, and a C/C
 If you want to add any missing whisper.cpp functionality, you need to:
 
 - Add the native method description in `WhisperJNI.java`.
-- Run the `generateHeaders` gradle task to regenerate the `src/main/native/jp_clip_whisperjni_WhisperJNI.h` header file.
-- Add the native method implementation in `src/main/native/jp_clip_whisperjni_WhisperJNI.cpp`.
+- Run the `generateHeaders` gradle task to regenerate the `src/main/native/jni/jp_clip_whisperjni_WhisperJNI.h` header file.
+- Add the native method implementation in `src/main/native/jni/jp_clip_whisperjni_WhisperJNI.cpp`.
 - Add a new test for it in `WhisperJNITest.java`.
