@@ -1,0 +1,165 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'org.jreleaser' version '1.26.0'
+}
+
+group = 'io.github.jaffe2718'
+version = project.version
+description = 'Java port of whisper.cpp, forked from whisper-jni by GiviMAD'
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+dependencies {
+    api 'org.slf4j:slf4j-api:2.0.16'
+
+    testImplementation platform("org.junit:junit-bom:${junitVersion}")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'org.slf4j:slf4j-simple:2.0.16'
+
+    // Gradle 9 no longer injects the test framework implementation automatically,
+    // so the JUnit Platform launcher has to be declared explicitly.
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+java {
+    // Try to keep this as low as possible.
+    // In a perfect world, this would be Java 8.
+    //
+    // NOTE: this is deliberately kept at 17 even though the build itself now runs on
+    // Java 25 (Gradle 9). Consumers of the published jar therefore only need Java 17+.
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+
+    withSourcesJar()
+    withJavadocJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    // Compile against the Java 17 API even when building with a newer JDK (e.g. Java 25).
+    options.release = 17
+}
+
+tasks.withType(Javadoc).configureEach {
+    options.encoding = 'UTF-8'
+    options.source = '17'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    testLogging.showStandardStreams = true
+
+    // JDK 22 introduced --enable-native-access and JDK 24+ prints a loud warning when
+    // native code is loaded from an unnamed module. whisper-jni is JNI by nature, so
+    // grant it explicitly. Guarded so that older JDKs do not choke on an unknown flag.
+    def testJavaMajor = Integer.parseInt(JavaVersion.current().majorVersion)
+    if (testJavaMajor >= 22) {
+        jvmArgs '--enable-native-access=ALL-UNNAMED'
+    }
+}
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            from components.java
+
+            pom {
+                // Apparently you need to do this because it doesn't get autofilled (at least for description)
+                name = project.name
+                description = project.description
+                url = 'https://github.com/jaffe2718/whisper-jni'
+
+                licenses {
+                    license {
+                        name = 'MIT License'
+                        url = 'https://opensource.org/license/mit'
+                    }
+                }
+
+                developers {
+                    developer {
+                        name = 'LI CHANGZHE'
+                        email = 'qqyttwqeei@163.com'
+                    }
+                }
+
+                scm {
+                    connection = 'scm:git:https://github.com/jaffe2718/whisper-jni.git'
+                    developerConnection = 'scm:git:ssh://github.com/jaffe2718/whisper-jni.git'
+                    url = 'https://github.com/jaffe2718/whisper-jni'
+                }
+            }
+        }
+    }
+    repositories {
+        maven {
+            url = layout.buildDirectory.dir('staging-deploy')
+        }
+    }
+}
+
+jreleaser {
+    signing {
+        active = 'ALWAYS'
+        armored = true
+    }
+
+    deploy {
+        maven {
+            mavenCentral {
+                sonatype {
+                    active = 'ALWAYS'
+                    url = 'https://central.sonatype.com/api/v1/publisher'
+                    stagingRepository('build/staging-deploy')
+
+                    // Double the retry delay as publishing takes a long time
+                    // Alternatively you can set JRELEASER_MAVENCENTRAL_STAGE: UPLOAD and manually publish
+                    retryDelay = 40
+                }
+            }
+        }
+    }
+}
+
+tasks.register('generateHeaders', JavaCompile) {
+    group = 'whisper-jni'
+    description = 'Regenerates the JNI headers in src/main/native from the Java native declarations'
+
+    source = fileTree('src/main/java')
+    classpath = sourceSets.main.compileClasspath
+    destinationDirectory.set(layout.buildDirectory.dir('generated/jni-headers'))
+    options.headerOutputDirectory.set(file('src/main/native'))
+}
+
+// Custom tasks for ease of use
+tasks.register('deployLocal') {
+    group = 'whisper-jni'
+    description = 'Convenience method to publish to maven local'
+
+    dependsOn 'clean', 'build', 'publish'
+    finalizedBy 'publishToMavenLocal'
+
+    doLast {
+        logger.lifecycle("Published version ${project.version}")
+    }
+}
+
+tasks.named('build') { mustRunAfter tasks.named('clean') }
+tasks.named('publish') { mustRunAfter tasks.named('build') }
+
+tasks.register('deployMaven') {
+    group = 'whisper-jni'
+    description = 'Convenience method to publish to maven central'
+
+    dependsOn tasks.named('deployLocal')
+    finalizedBy 'jreleaserDeploy'
+}
+
+// Always republish to ~/.m2 even if nothing changed
+//tasks.named('publishToMavenLocal') {
+//    outputs.upToDateWhen { false }   // disable incremental check
+//}
