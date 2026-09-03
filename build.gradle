@@ -99,6 +99,7 @@ tasks.register('benchmark', JavaExec) {
     systemProperty 'org.slf4j.simpleLogger.defaultLogLevel', 'warn'
     systemProperty 'file.encoding', 'UTF-8'
     systemProperty 'stdout.encoding', 'UTF-8'
+    systemProperty 'stderr.encoding', 'UTF-8'   // 日本語の例外メッセージが化けないように
 
     def benchJavaMajor = Integer.parseInt(JavaVersion.current().majorVersion)
     if (benchJavaMajor >= 22) {

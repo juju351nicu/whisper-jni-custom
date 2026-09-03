@@ -1,0 +1,56 @@
+# Windows 用ネイティブ（CPU 版と Vulkan 版）を GitHub Actions でビルドする軽量ワークフロー。
+#
+# main.yml（全プラットフォーム）は macOS ランナーが Actions 無料枠を 10 倍速で消費するため、
+# Windows の成果物だけ欲しいときはこちらを手動実行する（Actions タブ → このワークフロー → Run workflow）。
+# 成果物は Artifacts の windows-x64-OFF-natives（CPU）/ windows-x64-ON-natives（Vulkan）に出る。
+# 手元の PC に Visual Studio や Vulkan SDK を入れなくても GPU 版の DLL が手に入る。
+name: Windows natives
+
+on:
+    workflow_dispatch:
+
+jobs:
+    build-windows:
+        runs-on: windows-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                vulkan: [ OFF, ON ]
+        steps:
+            -   uses: actions/checkout@v4
+                with:
+                    submodules: true
+            -   uses: actions/setup-java@v4
+                with:
+                    java-version: 25
+                    distribution: 'temurin'
+            -   name: Install Vulkan SDK
+                uses: jakoch/install-vulkan-sdk-action@v1
+                if: matrix.vulkan == 'ON'
+                with:
+                    vulkan_version: 1.4.304.1
+                    install_runtime: true
+            -   name: Download test models
+                shell: powershell
+                run: |
+                    .\scripts\download-test-model.ps1
+                    .\scripts\download-vad-model.ps1
+                    Move-Item .\ggml-silero-v6.2.0.bin .\src\main\resources\ -Force
+            -   name: Build natives
+                shell: powershell
+                env:
+                    VULKAN: ${{ matrix.vulkan }}
+                run: .\scripts\build-windows.ps1
+            -   name: Test
+                run: ./gradlew test
+            -   name: Publish test report
+                uses: mikepenz/action-junit-report@v5
+                if: success() || failure()
+                with:
+                    report_paths: '**/build/test-results/**/*.xml'
+            -   name: Upload natives
+                uses: actions/upload-artifact@v4
+                with:
+                    name: windows-x64-${{ matrix.vulkan }}-natives
+                    path: whisperjni-build/*.dll
+                    retention-days: 30

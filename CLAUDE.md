@@ -141,7 +141,10 @@ C++ 側の設計方針は `.cpp` 冒頭のコメントに書いてある（ハ�
 
 ```
 whisper-jni-custom/
+├── .github/workflows/            CI。main.yml（全 OS）と windows-natives.yml（Windows の DLL だけ。手動実行）
+├── docs/                         引継ぎ資料など（handover-step5-speedup.md）
 ├── scripts/                      ビルド・モデル取得スクリプト
+├── models/                       計測用モデルの置き場所（ggml-*.bin は gitignore）
 ├── lombok.config                 Lombok 設定
 ├── src/main/java/jp/clip/
 │   ├── whisper/                  高水準 API（WhisperEngine / WhisperConfig / …）

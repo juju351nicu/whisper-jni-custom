@@ -755,7 +755,16 @@ git push
 
 ---
 
-## Step 5 — ③/⑦ 高速化（方針 (c)：whisper.cpp 側で詰める）  ▶ 5-1 計測ツール準備済み（2026-09-03）
+## Step 5 — ③/⑦ 高速化（方針 (c)：whisper.cpp 側で詰める）  ▶ 別 PC で実施（引継ぎ資料: `docs/handover-step5-speedup.md`）
+
+**2026-09-03 の決定**: 開発 PC では負荷試験もストレージ消費も避けたいため、計測と GPU 検証は
+別の PC（またはネットカフェ）で行う。手順は `docs/handover-step5-speedup.md` にまとめた。
+ポイントは、GPU 版（Vulkan）の DLL を **GitHub Actions（`.github/workflows/windows-natives.yml`、手動実行）で
+ビルドして Artifacts から取る**こと。作業 PC には Git・JDK 25（zip 版）・DLL だけあればよく、
+Visual Studio も Vulkan SDK も要らない。
+
+開発 PC 側では、持ち帰った CSV を下の 5-4 に貼り、採用条件を transcribe-shell に反映する。
+`models\` に落とした計測用モデル（約 1.2 GB）は開発 PC では不要なので削除してよい。
 
 **測定 → 1つずつ変更 → 再測定** を守ってください。まとめて変えると何が効いたか分かりません。
 

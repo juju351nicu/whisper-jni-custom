@@ -62,6 +62,11 @@ final class NativeRuntime
 		{
 			if(config.nativeLibraryDirectory() != null)
 			{
+				// Vulkan 版ネイティブの場合は先に Vulkan ランタイムが要る。無ければ何もしない（CPU 版なら不要）
+				if(NativeLibraryLoader.loadVulkanRuntimeIfPresent())
+				{
+					log.info("Vulkan ランタイムを読み込みました");
+				}
 				log.info("ネイティブライブラリを {} から読み込みます", config.nativeLibraryDirectory());
 				NativeLibraryLoader.load(log, config.nativeLibraryDirectory());
 			}
