@@ -65,9 +65,14 @@ build_lib() {
     rm -rf "$TMP_DIR"
 }
 
-# We aren't building for armv7l (at least right now) but functionality is still here
+# 既定は「どの x86_64 CPU でも動く可搬ビルド」（AVX 系を切る）。配布用にはこれが正しいが、
+# 速度は AVX2 有効時の半分以下になる。速度計測（EC2 等）では NATIVE=ON を付けて
+# 実行マシンの命令セットに最適化したビルドを使うこと。Windows の build-windows.ps1 は AVX2 が既定で有効。
 AARCH=$(uname -m)
-if [[ "$AARCH" =~ ^(arm64|aarch64)$ ]]; then
+if [[ "${NATIVE:-OFF}" == "ON" ]]; then
+    echo "[INFO] NATIVE=ON: このマシンの CPU 命令セットに最適化してビルドします（配布用ではありません）"
+    CMAKE_ARGS="-DGGML_NATIVE=ON" build_lib
+elif [[ "$AARCH" =~ ^(arm64|aarch64)$ ]]; then
     CMAKE_CFLAGS="-march=armv8.1-a+crc" build_lib
 elif [[ "$AARCH" =~ ^(x86_64|amd64|x64)$ ]]; then
     CMAKE_ARGS="-DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF" build_lib

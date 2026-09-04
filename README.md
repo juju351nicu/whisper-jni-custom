@@ -39,11 +39,13 @@ your local Maven repository:
 
 ```powershell
 # Windows
-.\scripts\build-windows.ps1
-New-Item -ItemType Directory -Force .\src\main\resources\windows-x64 | Out-Null
-Copy-Item .\whisperjni-build\*.dll .\src\main\resources\windows-x64\ -Force
-.\gradlew.bat publishToMavenLocal
+.\scripts\build-windows.ps1                       # ネイティブをビルド → whisperjni-build\
+.\gradlew.bat installNatives publishToMavenLocal   # DLL を src/main/resources/windows-x64 へコピーして jar に同梱し、~/.m2 へ
 ```
+
+`installNatives` は実行中の OS に合わせて `src/main/resources/<os>-<arch>/` へコピーします。
+jar には同梱ファイルの一覧 `natives.list` も入り、Spring Boot の実行可能 jar（jar の中の jar）からでも
+ネイティブを取り出せます。
 
 Then depend on it:
 

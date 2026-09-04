@@ -61,6 +61,51 @@ tasks.withType(Javadoc).configureEach {
     options.addStringOption('Xdoclint:all,-missing', '-quiet')
 }
 
+// 同梱ネイティブの一覧 natives.list を <os>-<arch>/ ごとに生成する。
+// Spring Boot の実行可能 jar（jar の中の jar）では jar 内のディレクトリを走査できないため、
+// BundledResources はこの一覧を読んでファイルを 1 つずつ取り出す。
+tasks.named('processResources') {
+    doLast {
+        def nativeDirs = destinationDir.listFiles({ File f -> f.isDirectory() && f.name ==~ /(windows|mac|linux)-(x64|x86|arm64)/ } as FileFilter) ?: []
+        nativeDirs.each { File dir ->
+            def natives = dir.listFiles({ File f -> f.isFile() && f.name ==~ /.*\.(dll|so|dylib)(\.\d+)*$/ } as FileFilter).collect { it.name }.sort()
+            new File(dir, 'natives.list').text = natives.join('\n') + '\n'
+            logger.lifecycle("natives.list: ${dir.name} -> ${natives}")
+        }
+    }
+}
+
+// ビルドスクリプトが whisperjni-build/ に出したネイティブを、実行中の OS 用の同梱先へコピーする。
+//   .\gradlew.bat installNatives publishToMavenLocal
+tasks.register('installNatives', Copy) {
+    group = 'whisper-jni'
+    description = 'Copies whisperjni-build/* into src/main/resources/<os>-<arch>/ so the jar bundles them'
+
+    def osName = System.getProperty('os.name').toLowerCase()
+    def os = osName.contains('win') ? 'windows' : osName.contains('mac') ? 'mac' : 'linux'
+    def archName = System.getProperty('os.arch').toLowerCase()
+    def arch = archName in ['amd64', 'x86_64', 'x86-64'] ? 'x64' : archName == 'aarch64' ? 'arm64' : archName
+
+    from('whisperjni-build') {
+        include '*.dll', '*.so', '*.so.*', '*.dylib'
+    }
+    into "src/main/resources/${os}-${arch}"
+    doFirst {
+        if (!file('whisperjni-build').isDirectory()) {
+            throw new GradleException('whisperjni-build/ がありません。先に scripts/ のビルドスクリプトを実行してください。')
+        }
+    }
+}
+
+// installNatives は src/main/resources に書き込む。src/main/resources を読むタスクは
+// processResources だけでなく sourcesJar / delombok / javadoc など複数あり、Gradle 9 は
+// 「順序が宣言されていない」と個別にエラーにするので、他の全タスクを installNatives の後に回す。
+tasks.configureEach { Task task ->
+    if (task.name != 'installNatives') {
+        task.mustRunAfter('installNatives')
+    }
+}
+
 // Apache-2.0 では、配布物に LICENSE と NOTICE を含める必要がある。
 tasks.named('jar', Jar) {
     metaInf {

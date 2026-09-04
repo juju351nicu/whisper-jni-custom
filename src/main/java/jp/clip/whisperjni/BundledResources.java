@@ -1,17 +1,21 @@
 package jp.clip.whisperjni;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystemAlreadyExistsException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
@@ -22,8 +26,8 @@ import org.slf4j.Logger;
  *
  * <p>
  * JNI の {@link System#load(String)} は実ファイルしか受け付けないため、jar の中身を一時ディレクトリへ
- * コピーしてから読み込みます。IDE から実行しているときのように jar に入っていない場合は、
- * クラスパス上のディレクトリからそのままコピーします。
+ * コピーしてから読み込みます。取り出すファイルの一覧は {@value #INDEX_FILE}（ビルド時に生成）から得るので、
+ * 通常の jar、Spring Boot の実行可能 jar（jar の中の jar）、IDE のクラスディレクトリのどれからでも動きます。
  * </p>
  *
  * <pre>
@@ -36,6 +40,16 @@ public final class BundledResources
 {
 	/** 同梱している VAD モデルのリソース名。 */
 	public static final String VAD_MODEL_RESOURCE = "ggml-silero-v6.2.0.bin";
+
+	/**
+	 * ネイティブディレクトリ内のファイル一覧（1 行 1 ファイル名）。ビルド時に Gradle の {@code processResources} が生成します。
+	 *
+	 * <p>
+	 * Spring Boot の実行可能 jar（{@code nested:} スキーム）のようにディレクトリを走査できない環境でも
+	 * 同梱ネイティブを取り出せるように、走査ではなくこの一覧を使います。一覧が無い場合だけ走査に切り替えます。
+	 * </p>
+	 */
+	public static final String INDEX_FILE = "natives.list";
 
 	private BundledResources()
 	{
@@ -83,6 +97,14 @@ public final class BundledResources
 	 */
 	public static void extractDirectory(Logger logger, String resourceName, Path destination) throws IOException
 	{
+		List<String> index = readIndex(resourceName);
+		if(!index.isEmpty())
+		{
+			logger.info("Extracting {} bundled files listed in {}/{} to {}", index.size(), resourceName, INDEX_FILE, destination);
+			extractListedFiles(resourceName, index, destination);
+			return;
+		}
+
 		URI uri = resourceUri(resourceName);
 		logger.info("Extracting resource {} to {} (os.name={}, os.arch={})", uri, destination, Platform.OS_NAME, Platform.OS_ARCH);
 
@@ -100,6 +122,37 @@ public final class BundledResources
 	// ------------------------------------------------------------------------
 	// 内部
 	// ------------------------------------------------------------------------
+
+	/**
+	 * {@code <resourceName>/natives.list} を読みます。無ければ空リスト。
+	 */
+	private static List<String> readIndex(String resourceName) throws IOException
+	{
+		InputStream stream = BundledResources.class.getClassLoader().getResourceAsStream(resourceName + "/" + INDEX_FILE);
+		if(stream == null)
+		{
+			return List.of();
+		}
+		try(BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8)))
+		{
+			return reader.lines()
+					.map(String::strip)
+					.filter(line -> !line.isEmpty() && !line.startsWith("#"))
+					.toList();
+		}
+	}
+
+	private static void extractListedFiles(String resourceName, List<String> fileNames, Path destination) throws IOException
+	{
+		Files.createDirectories(destination);
+		for(String fileName : fileNames)
+		{
+			try(InputStream stream = openResource(resourceName + "/" + fileName))
+			{
+				Files.copy(stream, destination.resolve(fileName), StandardCopyOption.REPLACE_EXISTING);
+			}
+		}
+	}
 
 	private static InputStream openResource(String resourceName) throws IOException
 	{

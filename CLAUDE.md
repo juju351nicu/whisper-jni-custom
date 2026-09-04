@@ -182,6 +182,8 @@ Move-Item .\ggml-silero-v6.2.0.bin .\src\main\resources\ -Force
 .\gradlew.bat test
 ```
 
+- jar に同梱して配布するときは `gradlew installNatives publishToMavenLocal`
+  （`whisperjni-build\` → `src/main/resources/<os>-<arch>/`、`natives.list` を自動生成）
 - ネイティブを作り直したら `build\` を消してから `scripts\build-windows.ps1`
   （`--fresh` を付けてあるが、念のため）
 - 高速化の計測は `gradlew benchmark "-Pbench.audio=..." "-Pbench.models=..."`（`Benchmark.java` の Javadoc 参照）。

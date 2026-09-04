@@ -755,6 +755,45 @@ git push
 
 ---
 
+## Step 4-5 — jar へのネイティブ同梱と transcribe-shell への組み込み  ▶ 2026-09-03 実装済み・Windows 検証待ち
+
+### whisper-jni-custom 側
+
+| 項目 | 内容 |
+|---|---|
+| `installNatives` タスク | `whisperjni-build\*.dll` を `src/main/resources/windows-x64/` へコピー（OS / arch は自動判定） |
+| `natives.list` | `processResources` が `<os>-<arch>/natives.list`（同梱ファイル一覧）を生成。`BundledResources` はこれを読んで 1 ファイルずつ取り出す。**Spring Boot の実行可能 jar（`nested:` スキーム）では jar 内のディレクトリを走査できない**ため、走査に頼らない方式に変えた（一覧が無い場合だけ従来の走査） |
+| 検証 | クラウドで linux-x64 の DLL 相当を同梱した jar を作り、`whisperjni-build` 無しで jar だけから読み込んで文字起こしできることを確認 |
+
+```powershell
+cd C:\pr-work\whisper-jni-custom
+.\gradlew.bat installNatives publishToMavenLocal
+dir $env:USERPROFILE\.m2\repository\jp\clip\whisper-jni-custom\1.9.3-1\     # jar / pom / sources / javadoc
+```
+
+### transcribe-shell 側（既存コマンドには触っていない）
+
+新コマンド **`transcribe-cpp`** を追加。既存の `transcribe`（外部プロセスの faster-whisper）と並行して使う。
+変更前の `src/` と `pom.xml` は `C:\pr-work\transcribe-shell\_backup-before-whisper-cpp-20260903\` に控えを置いた
+（transcribe-shell は git 管理されていないため）。
+
+| 追加・変更 | 内容 |
+|---|---|
+| `pom.xml` | `jp.clip:whisper-jni-custom:1.9.3-1` を追加（ローカル Maven から解決） |
+| `config/WhisperCppProperties` | `transcribe.cpp.*`（model-dir / native-library-dir / threads / vad）。既存 `TranscribeProperties` は無変更 |
+| `service/FfmpegWavSplitService` | ffmpeg で分割 + 16kHz モノラル WAV 変換（MP3 デコーダ不要にするため） |
+| `service/WhisperCppService` | `WhisperEngine` で part ごとに文字起こし。全 part 済みならモデルを読まない |
+| `service/TranscribeCppService` / `TranscribeCppOptions` | オーケストレーション。出力は `transcribe-cpp_<base>` |
+| `command/TranscribeCppCommand` | `transcribe` と同じオプション + `--threads` `--no-vad` |
+| `transcribe-cpp.bat` | ランチャ（`--enable-native-access=ALL-UNNAMED` 付き） |
+| `application.properties` | `logging.level.whisper.cpp=WARN` を追加（whisper.cpp のログ抑制） |
+| テスト | `TranscribeCppCommandTest`（Spring Shell の解析）、`FfmpegWavSplitServiceTest`、`WhisperCppServiceTest`（ネイティブ不要な範囲） |
+
+**既存への影響が無いことの確認**: `mvnw test` で既存テストが全件通ること、`transcribe.bat` が従来どおり動くこと。
+新コマンドは別クラス・別設定・別出力フォルダなので、実行時にも既存コマンドの経路には入らない。
+
+---
+
 ## Step 5 — ③/⑦ 高速化（方針 (c)：whisper.cpp 側で詰める）  ▶ 別 PC で実施（引継ぎ資料: `docs/handover-step5-speedup.md`）
 
 **2026-09-03 の決定**: 開発 PC では負荷試験もストレージ消費も避けたいため、計測と GPU 検証は

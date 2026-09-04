@@ -3,7 +3,7 @@
 作成: 2026-09-03。対象リポジトリ: https://github.com/juju351nicu/whisper-jni-custom（`main`、`b7b5ad6` 以降）
 
 この資料は、**開発 PC（i5-1335U / Iris Xe / ストレージ残 20 GB）では負荷試験とストレージ消費を避けたい**ため、
-高速化の計測と GPU 検証を別の PC（またはネットカフェ）で行うためのものです。
+高速化の計測と GPU 検証を EC2 または別の PC で行うためのものです（ネットカフェは互換確認程度に留める）。
 この資料だけ読めば作業できるように、前提から手順まで一通り書いてあります。
 
 ---
@@ -23,9 +23,104 @@
 
 ---
 
-## 2. 作業 PC に必要なもの
+## 2. どこで計測するか
 
-### 方式 A: ビルド済み DLL を GitHub Actions から取得する（推奨。ネットカフェでも可能）
+| 場所 | 向き不向き |
+|---|---|
+| **EC2（推奨）** | CPU の計測も GPU の比較も数時間で終わり、終わったら消せる。再現性が高く、手元 PC に負担が無い。費用は数百〜2,000 円程度（後述） |
+| 別のノート PC | CPU 計測なら十分。GPU があれば Vulkan も試せる。手順は「3. セットアップ（Windows）」 |
+| ネットカフェ | **互換確認程度に留める**。長時間の高負荷は店舗の規約に触れる可能性があり、管理者権限無し・再起動で環境消去・GPU ドライバ差で結果も安定しない |
+
+開発 PC（i5-1335U / Iris Xe）では、負荷試験はせず**日常の実運用での評価**（`transcribe` と `transcribe-cpp` の並走）に専念する。
+
+---
+
+## 3-A. EC2 で計測する（Linux）
+
+### インスタンスの選び方
+
+| 目的 | インスタンス | 目安（東京、オンデマンド） | 備考 |
+|---|---|---|---|
+| CPU 計測 | `c7i.2xlarge`（8 vCPU / 16 GB）または `c7a.2xlarge` | 約 0.5 USD/h | AVX-512 対応。開発 PC より速いので「PC の実力」ではなく「エンジン間の相対比較」と「モデル・VAD・スレッドの効き方」を見る用途 |
+| GPU 比較（CUDA） | `g5.xlarge`（A10G / 4 vCPU）または `g6.xlarge`（L4） | 約 1.5 USD/h | AMI は **Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 22.04)** を選ぶ。NVIDIA ドライバと CUDA Toolkit が入っていて、自分で入れなくてよい |
+
+Windows インスタンスは OS ライセンス分が高く、ビルド環境の準備にも時間がかかるので Linux を使う。
+Linux で得た「どのモデル・設定が速いか」の結論は Windows にもそのまま持ち帰れる。
+
+ディスクは 30 GB あれば足りる（OS + ツール + モデル 1.2 GB + リポジトリ）。**終わったら停止ではなく削除（terminate）**する。停止だけだと EBS 代がかかり続ける。
+
+### セットアップ（Ubuntu 22.04 / 24.04）
+
+```bash
+# 1. ツール。JDK は 21 でよい（ビルドは Java 17 互換バイトコード。Gradle ラッパーが Java 21 で動く）
+sudo apt update
+sudo apt install -y git cmake g++ openjdk-21-jdk ffmpeg unzip
+java -version   # 21.x
+
+# 2. リポジトリ
+git clone --recurse-submodules https://github.com/juju351nicu/whisper-jni-custom.git
+cd whisper-jni-custom
+
+# 3. ネイティブをビルド。計測なので NATIVE=ON（このマシンの CPU 命令セットに最適化。既定の可搬ビルドは AVX 無しで遅い）
+NATIVE=ON ./scripts/build-linux.sh            # → whisperjni-build/*.so
+
+# 3'. GPU インスタンスなら CUDA 版も（Deep Learning AMI なら nvcc が入っている。数十分かかる）
+#     CPU 版と別ディレクトリに分けておく
+mv whisperjni-build natives-cpu
+./scripts/build-cuda.sh && mv whisperjni-build natives-cuda
+
+# 4. モデルと VAD モデル
+./scripts/download-test-model.sh && ./scripts/download-vad-model.sh
+mv ggml-silero-v6.2.0.bin src/main/resources/
+mkdir -p models
+for m in small small-q5_1 large-v3-turbo-q5_0; do ./src/main/native/whisper/models/download-ggml-model.sh $m models; done
+
+# 5. 計測用音声を手元から送る（別ターミナルで）
+#    scp -i key.pem C:\audio\sample-ja.wav ubuntu@<ip>:~/whisper-jni-custom/sample-ja.wav
+
+# 6. 動作確認（48 tests）
+cp natives-cpu/*.so whisperjni-build/ 2>/dev/null || cp -r natives-cpu whisperjni-build
+./gradlew test
+```
+
+### 計測
+
+```bash
+# ベースライン
+./gradlew benchmark -Pbench.audio=sample-ja.wav -Pbench.models=models/ggml-small.bin -Pbench.natives=natives-cpu -Pbench.repeat=3
+
+# CPU: モデル × スレッド × VAD（vCPU 数に合わせて threads を選ぶ。c7i.2xlarge なら 4,8）
+./gradlew benchmark -Pbench.audio=sample-ja.wav \
+  "-Pbench.models=models/ggml-small.bin;models/ggml-small-q5_1.bin;models/ggml-large-v3-turbo-q5_0.bin" \
+  -Pbench.threads=4,8 -Pbench.vad=both -Pbench.natives=natives-cpu -Pbench.repeat=2
+
+# GPU（CUDA 版）。同じモデルで CPU 版との比を見る
+./gradlew benchmark -Pbench.audio=sample-ja.wav \
+  "-Pbench.models=models/ggml-small.bin;models/ggml-large-v3-turbo-q5_0.bin" \
+  -Pbench.vad=both -Pbench.natives=natives-cuda -Pbench.repeat=2
+
+# 結果を手元へ
+#    scp -i key.pem ubuntu@<ip>:~/whisper-jni-custom/build/benchmark/*.csv C:\pr-work\
+```
+
+GPU が使われたかは `system :` 行の `CUDA = 1` と、`build.gradle` の `benchmark` タスクのログレベルを `info` にしたときの
+`ggml_cuda_init: found 1 CUDA devices` で確認する。
+
+### 費用の目安
+
+セットアップ 30 分 + CPU 計測 1〜2 時間 + GPU 計測 1 時間 ≒ c7i 2 時間（1 USD）+ g5 2 時間（3 USD）。
+数百〜数千円で、ノート PC を何時間も回すより安く、結果も再現できる。
+
+### EC2 の結果を Windows に持ち帰るときの注意
+
+- 絶対速度は EC2 の CPU/GPU のもの。**開発 PC で採用する設定の「相対的な優劣」**（どのモデルが速度と精度の釣り合いが良いか、VAD が効くか、スレッド数の伸び方）を持ち帰る
+- GPU で大きく速くなったなら、Windows 側では Vulkan 版 DLL（`windows-natives.yml` の Artifacts）を NVIDIA / AMD GPU のある PC で試す価値がある。Iris Xe の開発 PC には期待しない
+
+---
+
+## 3-B. 別 PC（Windows）で計測する
+
+### 方式 A: ビルド済み DLL を GitHub Actions から取得する（推奨）
 
 Visual Studio も Vulkan SDK も入れない。必要なのは次の 3 つだけ。管理者権限も不要。
 
@@ -45,11 +140,9 @@ Gradle 本体はラッパーが自動で取得する（約 150 MB、`GRADLE_USER
 
 VS 2026 Community + C++ ワークロード（約 9 GB）、CMake 4.x、Vulkan SDK（約 1.5 GB）が要る。
 手順は `WINDOWS-BUILD-1.9.3.md` §3 と同じ。Vulkan 版は環境変数 `VULKAN=ON` を付けて
-`scripts\build-windows.ps1` を実行する。ネットカフェでは現実的でないので、方式 A を使う。
+`scripts\build-windows.ps1` を実行する。
 
----
-
-## 3. セットアップ手順（方式 A）
+### セットアップ手順（方式 A）
 
 ```powershell
 # 0. JDK と Git を展開したパスに合わせて設定（例）
@@ -63,8 +156,6 @@ git clone --recurse-submodules https://github.com/juju351nicu/whisper-jni-custom
 cd whisper-jni-custom
 
 # 2. GitHub Actions の Artifacts（zip）を展開して配置
-#    windows-x64-OFF-natives.zip → .\natives-cpu\    （ggml.dll, whisper.dll, whisper-jni.dll ...）
-#    windows-x64-ON-natives.zip  → .\natives-vulkan\ （上に加えて ggml-vulkan.dll）
 Expand-Archive ~\Downloads\windows-x64-OFF-natives.zip .\natives-cpu
 Expand-Archive ~\Downloads\windows-x64-ON-natives.zip  .\natives-vulkan
 Get-ChildItem .\natives-cpu, .\natives-vulkan          # DLL が 6〜7 個ずつあること
@@ -100,7 +191,7 @@ Copy-Item .\natives-cpu\*.dll .\whisperjni-build\ -Force     # テストは whis
 
 ---
 
-## 5. 計測手順
+## 5. 計測手順（Windows の例。EC2 では 3-A のコマンドを使う）
 
 計測ツールは `src/test/java/jp/clip/whisper/Benchmark.java`、起動は Gradle の `benchmark` タスク。
 引数は `-Pbench.<名前>=<値>`。
